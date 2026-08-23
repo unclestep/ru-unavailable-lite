@@ -1,0 +1,91 @@
+name: build
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**/README.md"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Set variables
+        run: |
+          echo "RELEASE_NAME=Released on $(date +%Y%m%d%H%M)" >> $GITHUB_ENV
+          echo "TAG_NAME=$(date +%Y%m%d%H%M)" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Execute notebook
+        env:
+          # Токен снимает лимит анонимных запросов к GitHub API: список файлов
+          # vernette/rulesets запрашивается через API, а раннеры Actions делят
+          # общий пул адресов и упираются в лимит.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Необязателен: без ключа шаг Safe Browsing пропускается.
+          GOOGLE_SAFE_BROWSING_KEY: ${{ secrets.GOOGLE_SAFE_BROWSING_KEY }}
+          USE_GOOGLE_SAFE_BROWSING_KEY: false
+        run: |
+          jupyter nbconvert \
+            --to notebook \
+            --execute build.ipynb \
+            --output executed.ipynb \
+            --ExecutePreprocessor.timeout=5400
+
+      - name: Verify output
+        run: |
+          test -s publish/geosite.dat
+          test -s publish/ru-blocked.txt
+          test -s publish/ru-forbidden.txt
+          (cd publish && sha256sum geosite.dat > geosite.dat.sha256sum)
+          ls -la publish/
+
+      - name: Upload execution log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: executed-notebook
+          path: executed.ipynb
+          retention-days: 7
+
+      - name: Release and upload assets
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          release_name: ${{ env.RELEASE_NAME }}
+          tag: ${{ env.TAG_NAME }}
+          file_glob: true
+          file: ./publish/*
+
+      - name: Git push assets to "release" branch
+        run: |
+          cd publish || exit 1
+          git init
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b release
+          git add .
+          git commit -m "${{ env.RELEASE_NAME }}"
+          git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
+          git push -f -u origin release

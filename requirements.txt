@@ -1,0 +1,6 @@
+requests>=2.31
+dnspython>=2.6
+scikit-learn>=1.4
+numpy>=1.26
+nbconvert>=7.16
+ipykernel>=6.29
