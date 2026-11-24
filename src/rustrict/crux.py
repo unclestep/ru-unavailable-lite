@@ -82,15 +82,20 @@ def filter_by_crux(domains: list[str], crux: CruxSnapshot, psl: PSL) -> list[str
     Apex domains match by registrable domain; subdomains must match their exact
     CrUX host so obscure subdomains cannot ride on a popular shared host's rank.
     """
-    kept: list[str] = []
+    return list(domain_crux_ranks(domains, crux, psl))
+
+
+def domain_crux_ranks(domains: list[str], crux: CruxSnapshot, psl: PSL) -> dict[str, int]:
+    """Return mapping of domains present in CrUX RU to their popularity rank."""
+    out: dict[str, int] = {}
     for d in domains:
         reg = psl.registrable(d)
         if d == reg:
             if reg in crux.reg_ranks:
-                kept.append(d)
+                out[d] = crux.reg_ranks[reg]
         elif d in crux.host_ranks:
-            kept.append(d)
-    return kept
+            out[d] = crux.host_ranks[d]
+    return out
 
 
 def save_crux_snapshot(path: Path, snap: CruxSnapshot) -> None:

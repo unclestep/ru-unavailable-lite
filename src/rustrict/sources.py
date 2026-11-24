@@ -33,6 +33,14 @@ PSL_URL = "https://raw.githubusercontent.com/publicsuffix/list/master/public_suf
 
 GEOIP_IPV4_URL = "https://github.com/sapics/ip-location-db/releases/download/latest/server-country-ipv4.csv"
 GEOIP_IPV6_URL = "https://github.com/sapics/ip-location-db/releases/download/latest/server-country-ipv6.csv"
+IPTOASN_V4_URL = "https://github.com/sapics/ip-location-db/releases/download/latest/iptoasn-asn-ipv4.csv"
+IPTOASN_V6_URL = "https://github.com/sapics/ip-location-db/releases/download/latest/iptoasn-asn-ipv6.csv"
+
+SPAMHAUS_DROP_V4_URL = "https://www.spamhaus.org/drop/drop_v4.json"
+SPAMHAUS_DROP_V6_URL = "https://www.spamhaus.org/drop/drop_v6.json"
+SPAMHAUS_ASNDROP_URL = "https://www.spamhaus.org/drop/asndrop.json"
+FIREHOL_L1_URL = "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset"
+FIREHOL_L2_URL = "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level2.netset"
 
 FOREIGN_GEOIP_URL = "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
 GOOGLE_ALL_IPS_URL = "https://www.gstatic.com/ipranges/goog.json"
@@ -50,6 +58,8 @@ GAMBLING_HOSTS_URLS = (
     "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling-only/hosts",
 )
 HAGEZI_GAMBLING_URL = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/gambling-onlydomains.txt"
+HAGEZI_NSFW_URL = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/nsfw-onlydomains.txt"
+HAGEZI_TIF_URL = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif-onlydomains.txt"
 ADGUARD_PHISHING_URL = (
     "https://raw.githubusercontent.com/AdguardTeam/HostlistsRegistry/main/"
     "filters/security/filter_30_PhishingURLBlocklist/filter.txt"
@@ -167,6 +177,10 @@ def fetch_junk_feeds(session: requests.Session) -> dict[str, set[str]]:
             porn.update(fetch_hosts_file(session, url))
         except Exception as exc:
             log.warning("feed porn (%s) failed: %s", url, exc)
+    try:
+        porn.update(fetch_plain_list(session, HAGEZI_NSFW_URL))
+    except Exception as exc:
+        log.warning("feed hagezi/nsfw failed: %s", exc)
     feeds["porn"] = porn
     log.info("feed porn: %d", len(porn))
 
@@ -182,6 +196,12 @@ def fetch_junk_feeds(session: requests.Session) -> dict[str, set[str]]:
         log.warning("feed hagezi/gambling failed: %s", exc)
     feeds["gambling_extra"] = gambling_extra
     log.info("feed gambling_extra: %d", len(gambling_extra))
+
+    try:
+        feeds["hagezi/tif"] = set(fetch_plain_list(session, HAGEZI_TIF_URL))
+        log.info("feed hagezi/tif: %d", len(feeds["hagezi/tif"]))
+    except Exception as exc:
+        log.warning("feed hagezi/tif failed: %s", exc)
 
     try:
         feeds["adguard/phishing"] = fetch_adblock_list(session, ADGUARD_PHISHING_URL)

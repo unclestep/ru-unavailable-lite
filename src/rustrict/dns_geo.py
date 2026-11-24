@@ -121,6 +121,28 @@ def resolve_domains(domains: list[str], workers: int = 100) -> dict[str, DnsResu
     return results
 
 
+def check_mx_records(domains: list[str], workers: int = 80, timeout: float = FAST_TIMEOUT) -> set[str]:
+    """Return subset of domains that publish MX records (useful to flag mail-only domains)."""
+    if not domains:
+        return set()
+
+    resolver = _new_resolver()
+
+    def has_mx(domain: str) -> bool:
+        try:
+            answers = resolver.resolve(domain, "MX", lifetime=timeout)
+            return len(answers) > 0
+        except Exception:
+            return False
+
+    found: set[str] = set()
+    with cf.ThreadPoolExecutor(max_workers=workers) as pool:
+        for d, ok in zip(domains, pool.map(has_mx, domains)):
+            if ok:
+                found.add(d)
+    return found
+
+
 def is_ru_hosted(ips: tuple[str, ...], db: CountryDB) -> bool:
     """Return True if all resolved IPs belong to Russia (mixed CDN results stay kept)."""
     if not ips:
