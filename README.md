@@ -1,6 +1,6 @@
 # rustrict
 
-Automated weekly pipeline that builds clean, compact split-routing lists for Xray (`geosite.dat`, `geoip.dat`, `split-rules.json`).
+Automated weekly pipeline that extracts the 'very, very bad' popular domains and distills them into a tight list, making it crystal clear who gets the strict treatment."
 
 ## Release Artifacts
 
