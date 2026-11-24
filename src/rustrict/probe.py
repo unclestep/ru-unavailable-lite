@@ -187,10 +187,21 @@ class _MetadataParser(HTMLParser):
             self._body_len += len(text) + 1
 
 
+def _decode_html(html_bytes: bytes, charset: str | None) -> str:
+    encoding = (charset or "").strip() or "utf-8"
+    try:
+        return html_bytes.decode(encoding, errors="replace")
+    except (LookupError, ValueError):
+        normalized = encoding.lower().replace("-", "").replace("_", "")
+        if normalized in ("cp1251", "win1251", "windows1251"):
+            return html_bytes.decode("cp1251", errors="replace")
+        return html_bytes.decode("utf-8", errors="replace")
+
+
 def parse_html_metadata(
     html_bytes: bytes, charset: str | None = None
 ) -> dict[str, str]:
-    text = html_bytes.decode(charset or "utf-8", errors="replace")
+    text = _decode_html(html_bytes, charset)
     parser = _MetadataParser()
     try:
         parser.feed(text)
@@ -384,9 +395,16 @@ async def _probe_batch_async(
         cookie_jar=aiohttp.DummyCookieJar(),
     ) as session:
         tasks = [asyncio.create_task(bound_probe(session, d)) for d in domains]
-        for coro in asyncio.as_completed(tasks):
-            res = await coro
-            results[res.domain] = res
+        try:
+            for coro in asyncio.as_completed(tasks):
+                res = await coro
+                results[res.domain] = res
+        finally:
+            pending = [t for t in tasks if not t.done()]
+            for t in pending:
+                t.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
 
     return results
 

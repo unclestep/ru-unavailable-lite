@@ -344,6 +344,16 @@ class TestProbeAndSSRF(unittest.TestCase):
             "dead",
         )
 
+    def test_parse_html_metadata_handles_nonstandard_and_unknown_charsets(self) -> None:
+        cp1251_html = "<title>Привет мир</title>".encode("cp1251")
+        meta = parse_html_metadata(cp1251_html, charset="cp-1251")
+        self.assertEqual(meta["title"], "Привет мир")
+
+        unknown_meta = parse_html_metadata(
+            b"<title>Fallback</title>", charset="no-such-charset"
+        )
+        self.assertEqual(unknown_meta["title"], "Fallback")
+
     def test_probe_cache_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "cache.json.gz"
