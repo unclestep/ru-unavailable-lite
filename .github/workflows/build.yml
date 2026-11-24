@@ -1,4 +1,5 @@
 name: build
+
 on:
   workflow_dispatch:
   schedule:
@@ -8,64 +9,84 @@ on:
       - main
     paths-ignore:
       - "**/README.md"
+
 permissions:
   contents: write
   id-token: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 45
+
     steps:
-      - name: Set variables
+      - name: Set release metadata
         run: |
-          echo "RELEASE_NAME=Released on $(date +%Y%m%d%H%M)" >> $GITHUB_ENV
-          echo "TAG_NAME=$(date +%Y%m%d%H%M)" >> $GITHUB_ENV
-        shell: bash
+          TAG="$(date -u +%Y%m%d%H%M)"
+          echo "TAG_NAME=${TAG}" >> "$GITHUB_ENV"
+          echo "RELEASE_NAME=Released on ${TAG}" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
+
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: PYTHONPATH=src python -m unittest discover -s tests -v
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           project_id: rkn-block-filtering
           workload_identity_provider: projects/500205253986/locations/global/workloadIdentityPools/github-pool/providers/github-provider
           service_account: crux-bigquery-reader@rkn-block-filtering.iam.gserviceaccount.com
-      - name: Execute notebook
-        env:
-          # Токен снимает лимит анонимных запросов к GitHub API: список файлов
-          # vernette/rulesets запрашивается через API, а раннеры Actions делят
-          # общий пул адресов и упираются в лимит.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Необязателен: при пустом значении шаг Safe Browsing пропускается.
-          GOOGLE_SAFE_BROWSING_KEY: ${{ secrets.GOOGLE_SAFE_BROWSING_KEY }}
+
+      - name: Fetch CrUX snapshot
+        run: PYTHONPATH=src python -m rustrict.build --stage crux --work-dir work
+
+      - name: Scrub GCP credentials before untrusted crawl
         run: |
-          jupyter nbconvert \
-            --to notebook \
-            --execute build.ipynb \
-            --output executed.ipynb \
-            --ExecutePreprocessor.timeout=5400
+          rm -f "${GOOGLE_APPLICATION_CREDENTIALS:-}" gha-creds-*.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=" >> "$GITHUB_ENV"
+
+      - name: Restore HTML probe cache
+        uses: actions/cache@v4
+        with:
+          path: work/probe-cache.json.gz
+          key: probe-cache-${{ env.TAG_NAME }}
+          restore-keys: |
+            probe-cache-
+
+      - name: Build lists and artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PYTHONPATH=src python -m rustrict.build \
+            --stage build \
+            --work-dir work \
+            --out-dir publish \
+            --allowlist allowlist.txt \
+            --cache-file work/probe-cache.json.gz \
+            --version "${{ env.TAG_NAME }}"
+
       - name: Verify output
         run: |
           test -s publish/geosite.dat
           test -s publish/geoip.dat
+          test -s publish/split-rules.json
           test -s publish/ru-blocked.txt
           test -s publish/ru-forbidden.txt
-          (cd publish && sha256sum geosite.dat geoip.dat > checksums.sha256sum)
-          ls -la publish/
-      - name: Upload execution log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: executed-notebook
-          path: executed.ipynb
-          retention-days: 7
-          if-no-files-found: ignore
+          (cd publish && sha256sum -c checksums.sha256sum)
+          cat publish/stats.json
+          ls -lh publish/
+
       - name: Release and upload assets
         uses: svenstaro/upload-release-action@v2
         with:
@@ -74,9 +95,10 @@ jobs:
           tag: ${{ env.TAG_NAME }}
           file_glob: true
           file: ./publish/*
-      - name: Git push assets to "release" branch
+
+      - name: Push assets to release branch
         run: |
-          cd publish || exit 1
+          cd publish
           git init
           git config --local user.name "github-actions[bot]"
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
