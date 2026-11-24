@@ -1,0 +1,75 @@
+{
+  "crux_yyyymm": 202610,
+  "raw_normalized": {
+    "ru_blocked": 1645109,
+    "ru_forbidden": 1741
+  },
+  "ru_forbidden_dropped_ru_host": 7,
+  "subdomain_farms_dropped": 230235,
+  "after_crux": 13203,
+  "dns_geo_dropped": {
+    "dead": 399,
+    "ru_hosted": 672
+  },
+  "deterministic_dropped": {
+    "feed": 5291,
+    "mirror_cluster": 854,
+    "rule:porn": 320,
+    "rule:gambling": 610,
+    "rule:gambling_tld": 97,
+    "rule:piracy_kino": 365,
+    "rule:illicit_ru": 41,
+    "rule:probiv_leaks": 38,
+    "rule:adult_tld": 19
+  },
+  "tainted_cohosted_ips": 250,
+  "domain_ml_auc": 0.9555,
+  "scoring_dropped": {
+    "sem:porn": 292,
+    "probe:dead": 218,
+    "sem:gambling": 210,
+    "sem:piracy_kino": 139,
+    "html:gambling": 70,
+    "sem:illicit_substances": 69,
+    "sem:probiv_deanon": 66,
+    "html:porn": 57,
+    "ml:domain_high": 52,
+    "html:ssrf": 46,
+    "html:meta_adult": 42,
+    "html:piracy_kino": 36,
+    "dga:leetspeak": 34,
+    "html:redirect_feed": 30,
+    "dga:random_chars": 24,
+    "ml:content_high": 24,
+    "ml:domain_med": 20,
+    "rep:bad_asn": 19,
+    "rep:cohosted_junk_ip": 17,
+    "grey:no_html_suspicious": 16,
+    "html:redirect_rule:gambling": 9,
+    "html:redirect_rule:porn": 9,
+    "ml:content_med": 3,
+    "html:parked": 3,
+    "taint:stem": 2,
+    "rdap:new_lt90d": 1,
+    "rep:bad_ip": 1,
+    "html:redirect_rule:illicit_ru": 1,
+    "html:redirect_rule:probiv_leaks": 1,
+    "html:redirect_rule:gambling_tld": 1,
+    "html_weak:piracy_kino": 1
+  },
+  "version": "202611240851",
+  "output": {
+    "ru_blocked": 2762,
+    "ru_forbidden": 1734,
+    "split_domains": 4492,
+    "split_ips": 671,
+    "geoip_categories": {
+      "FACEBOOK": 122,
+      "GOOGLE": 395,
+      "NETFLIX": 122,
+      "PRIVATE": 28,
+      "TELEGRAM": 12,
+      "TWITTER": 20
+    }
+  }
+}
