@@ -56,17 +56,26 @@ jobs:
           rm -f "${GOOGLE_APPLICATION_CREDENTIALS:-}" gha-creds-*.json
           echo "GOOGLE_APPLICATION_CREDENTIALS=" >> "$GITHUB_ENV"
 
-      - name: Restore HTML probe cache
+      - name: Restore probe and RDAP caches
         uses: actions/cache@v4
         with:
-          path: work/probe-cache.json.gz
-          key: probe-cache-${{ env.TAG_NAME }}
+          path: |
+            work/probe-cache.json.gz
+            work/rdap-cache.json.gz
+          key: probe-rdap-cache-${{ env.TAG_NAME }}
           restore-keys: |
-            probe-cache-
+            probe-rdap-cache-
+
+      - name: Cache fastembed ONNX model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/fastembed
+          key: fastembed-multilingual-minilm-v1
 
       - name: Build lists and artifacts
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FASTEMBED_CACHE_PATH: /home/runner/.cache/fastembed
         run: |
           PYTHONPATH=src python -m rustrict.build \
             --stage build \
@@ -74,7 +83,17 @@ jobs:
             --out-dir publish \
             --allowlist allowlist.txt \
             --cache-file work/probe-cache.json.gz \
+            --rdap-cache work/rdap-cache.json.gz \
             --version "${{ env.TAG_NAME }}"
+
+      - name: Upload scoring audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoring-audit
+          path: work/audit.json
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Verify output
         run: |
