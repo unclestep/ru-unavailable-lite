@@ -1,4 +1,4 @@
-"""Two-stage ML classifier: Domain+Structural model and HTML+Domain content classifier."""
+"""Feature extraction and ML classifiers: Domain+Structural and HTML+Domain content."""
 
 from __future__ import annotations
 
@@ -16,51 +16,70 @@ from sklearn.metrics import precision_recall_curve, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-from .filters import SKETCHY_TLDS, domain_stem, has_mirror_shape, match_junk_domain_rule
+from .filters import SKETCHY_TLDS, dga_signals, domain_stem, has_mirror_shape, match_junk_domain_rule
 from .normalize import DomainMatcher, PSL
 from .probe import PageProbe
 
 log = logging.getLogger(__name__)
 
-# High-precision page content signals (require >= 2 distinct matches per category).
-_HTML_GAMBLING_SIGNALS = (
-    re.compile(r"\b(?:онлайн[- ]?казино|казино онлайн|игровые автоматы|игровых автоматов)\b", re.I),
-    re.compile(r"\b(?:фриспин\w*|бездепозитн\w*|бонус за регистрацию|промокод\w* казино)\b", re.I),
-    re.compile(r"\b(?:слоты онлайн|играть в слоты|игровые слоты|крутить слоты|джекпот)\b", re.I),
-    re.compile(r"\b(?:букмекерск\w* контор\w*|ставки на спорт|зеркало бк|рабочее зеркало)\b", re.I),
-    re.compile(r"\b(?:online casino|free spins|slot machines|sports betting|live roulette)\b", re.I),
-    re.compile(r"\b(?:1xbet|1win|vavada|pin[- ]?up casino|azino777|vulkan casino|mostbet|melbet)\b", re.I),
-)
-
-_HTML_PORN_SIGNALS = (
-    re.compile(r"\b(?:порно онлайн|бесплатное порно|порно видео|порно ролики|порнух\w*)\b", re.I),
-    re.compile(r"\b(?:секс видео|смотреть порно|домашнее порно|русское порно|хентай)\b", re.I),
-    re.compile(r"\b(?:интим услуг\w*|проститутк\w*|эскорт услуг\w*|вебкам модел\w*)\b", re.I),
-    re.compile(r"\b(?:free porn|porn videos|xxx videos|live sex cams?|porn tube|hardcore sex)\b", re.I),
-)
-
-_HTML_PIRACY_SIGNALS = (
-    re.compile(r"\b(?:смотреть онлайн бесплатно|фильмы онлайн бесплатно|сериалы онлайн бесплатно)\b", re.I),
-    re.compile(r"\b(?:в хорошем качестве|в качестве hd|hd 720|hd 1080|full hd бесплатно)\b", re.I),
-    re.compile(r"\b(?:все серии подряд|все сезоны онлайн|смотреть фильм онлайн)\b", re.I),
-    re.compile(r"\b(?:lordfilm|hdrezka|kinogo|baskino|seasonvar|lostfilm|animego|zagonka)\b", re.I),
-)
-
-_HTML_ILLICIT_SIGNALS = (
-    re.compile(r"\b(?:купить справку|медсправк\w* без посещения|купить больничный)\b", re.I),
-    re.compile(r"\b(?:временная регистрация купить|купить прописку|купить диплом)\b", re.I),
-    re.compile(r"\b(?:даркнет маркет|купить закладк\w*|моментальные клады)\b", re.I),
-)
+_HTML_CATEGORY_SIGNALS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "gambling": (
+        re.compile(r"\b(?:онлайн[- ]?казино|казино онлайн|игровые автоматы|игровых автоматов)\b", re.I),
+        re.compile(r"\b(?:фриспин\w*|бездепозитн\w*|бонус за регистрацию|промокод\w* казино)\b", re.I),
+        re.compile(r"\b(?:слоты онлайн|играть в слоты|игровые слоты|крутить слоты|джекпот|megaways)\b", re.I),
+        re.compile(r"\b(?:букмекерск\w* контор\w*|ставки на спорт|зеркало бк|рабочее зеркало)\b", re.I),
+        re.compile(r"\b(?:online casino|free spins|slot machines|sports betting|live roulette)\b", re.I),
+        re.compile(r"\b(?:1xbet|1win|vavada|pin[- ]?up|pinco|azino777|vulkan|mostbet|melbet|cabura)\b", re.I),
+    ),
+    "porn": (
+        re.compile(r"\b(?:порно онлайн|бесплатное порно|порно видео|порно ролики|порнух\w*)\b", re.I),
+        re.compile(r"\b(?:секс видео|смотреть порно|домашнее порно|русское порно|хентай)\b", re.I),
+        re.compile(r"\b(?:интим услуг\w*|проститутк\w*|индивидуалк\w*|эскорт услуг\w*|вебкам модел\w*)\b", re.I),
+        re.compile(r"\b(?:free porn|porn videos|xxx videos|live sex cams?|porn tube|hardcore sex|bdsm)\b", re.I),
+    ),
+    "piracy_kino": (
+        re.compile(r"\b(?:смотреть онлайн бесплатно|фильмы онлайн бесплатно|сериалы онлайн бесплатно)\b", re.I),
+        re.compile(r"\b(?:в хорошем качестве|в качестве hd|hd 720|hd 1080|full hd бесплатно)\b", re.I),
+        re.compile(r"\b(?:все серии подряд|все сезоны онлайн|смотреть фильм онлайн)\b", re.I),
+        re.compile(r"\b(?:lord-?film|hdrezka|kinogo|baskino|seasonvar|lostfilm|animego|zagonka|kinobar)\b", re.I),
+    ),
+    "probiv_leaks": (
+        re.compile(r"\b(?:пробив по номеру|пробить человека|глаз бога|деанон|бот пробива)\b", re.I),
+        re.compile(r"\b(?:складчина курсов|слив курсов|купить аккаунты|базы данных пробив)\b", re.I),
+    ),
+    "illicit_ru": (
+        re.compile(r"\b(?:купить справку|медсправк\w* без посещения|купить больничный|купить права)\b", re.I),
+        re.compile(r"\b(?:временная регистрация купить|купить прописку|купить диплом)\b", re.I),
+        re.compile(r"\b(?:даркнет маркет|купить закладк\w*|моментальные клады|семена конопли)\b", re.I),
+        re.compile(r"\b(?:купить сигареты оптом|вейп шоп|доставка алкоголя ночью|купить анаболики)\b", re.I),
+    ),
+}
 
 _ADULT_META_RE = re.compile(r"(?:adult|mature|rta-5042)", re.I)
 
 
-def match_junk_html(
+def html_keyword_hits(probe: PageProbe) -> tuple[str | None, int]:
+    """Return the strongest matching junk HTML category and its distinct signal count."""
+    text = probe.combined_text()
+    if not text:
+        return None, 0
+
+    best_cat: str | None = None
+    best_hits = 0
+    for cat, patterns in _HTML_CATEGORY_SIGNALS.items():
+        hits = sum(1 for rx in patterns if rx.search(text))
+        if hits > best_hits:
+            best_cat = cat
+            best_hits = hits
+    return best_cat, best_hits
+
+
+def match_hard_html_junk(
     probe: PageProbe,
     psl: PSL,
     feed_matcher: DomainMatcher,
 ) -> str | None:
-    """Return junk category if fetched HTML or redirect target clearly indicates junk."""
+    """Return hard-drop reason when HTML/redirect evidence is unambiguous."""
     if probe.status == "parked":
         return "html:parked"
     if probe.status == "blocked_ssrf":
@@ -75,19 +94,6 @@ def match_junk_html(
 
     if probe.meta_rating and _ADULT_META_RE.search(probe.meta_rating):
         return "html:meta_adult"
-
-    text = probe.combined_text()
-    if not text:
-        return None
-
-    if sum(1 for rx in _HTML_GAMBLING_SIGNALS if rx.search(text)) >= 2:
-        return "html:gambling"
-    if sum(1 for rx in _HTML_PORN_SIGNALS if rx.search(text)) >= 2:
-        return "html:porn"
-    if sum(1 for rx in _HTML_PIRACY_SIGNALS if rx.search(text)) >= 2:
-        return "html:piracy_kino"
-    if any(rx.search(text) for rx in _HTML_ILLICIT_SIGNALS):
-        return "html:illicit_ru"
 
     return None
 
@@ -113,7 +119,8 @@ def _structural_features(
         digits = sum(ch.isdigit() for ch in sld)
         hyphens = sld.count("-")
         stem = domain_stem(sld)
-        stem_freq = math.log1p(stem_counts.get(stem, 0)) if len(stem) >= 4 else 0.0
+        stem_freq = math.log1p(stem_counts.get(stem, 0)) if len(stem) >= 3 else 0.0
+        dga = dga_signals(d, psl)
         rows.append([
             float(len(sld)),
             digits / n,
@@ -121,6 +128,8 @@ def _structural_features(
             _shannon_entropy(sld),
             1.0 if tld in SKETCHY_TLDS else 0.0,
             1.0 if has_mirror_shape(d, psl) else 0.0,
+            1.0 if dga["leetspeak"] else 0.0,
+            1.0 if dga["consonant_cluster"] else 0.0,
             stem_freq,
         ])
     return np.asarray(rows, dtype=np.float64)
@@ -133,7 +142,7 @@ def _threshold_for_precision(y_true: np.ndarray, scores: np.ndarray, target_prec
 
 
 class DomainClassifier:
-    """Domain-name + structural classifier (used as fallback when HTML is blocked/403)."""
+    """Domain-name + structural classifier (lexical char n-grams + DGA/TLD/stem features)."""
 
     def __init__(self, psl: PSL, stem_counts: Counter[str]) -> None:
         self.psl = psl
@@ -185,7 +194,7 @@ class DomainClassifier:
 
 
 class ContentClassifier:
-    """HTML + Domain classifier trained via distant supervision on probed pages."""
+    """HTML + Domain TF-IDF classifier trained via distant supervision on probed pages."""
 
     def __init__(self) -> None:
         self.word_vec = TfidfVectorizer(
@@ -252,76 +261,3 @@ class ContentClassifier:
         if not probes or not self.fitted:
             return np.zeros(len(probes), dtype=np.float64)
         return self.model.predict_proba(self._transform(probes))[:, 1]
-
-
-def classify_probed_domains(
-    domains: list[str],
-    probes: dict[str, PageProbe],
-    domain_clf: DomainClassifier,
-    psl: PSL,
-    feed_matcher: DomainMatcher,
-    allow_matcher: DomainMatcher,
-    legit_seed_probes: list[PageProbe] | None = None,
-) -> tuple[list[str], dict[str, list[str]]]:
-    """Run HTML rules, HTML+Domain distant-supervision ML, and Domain fallback."""
-    dropped: dict[str, list[str]] = {}
-    domain_scores = dict(zip(domains, domain_clf.predict_scores(domains)))
-
-    ambiguous_with_html: list[PageProbe] = []
-    ambiguous_no_html: list[str] = []
-    junk_html_seeds: list[PageProbe] = []
-    legit_html_seeds: list[PageProbe] = list(legit_seed_probes or [])
-    kept: list[str] = []
-
-    for d in domains:
-        if allow_matcher.match(d) or psl.is_public_suffix(d):
-            kept.append(d)
-            continue
-
-        probe = probes.get(d)
-        if probe is None:
-            ambiguous_no_html.append(d)
-            continue
-
-        if probe.status == "dead":
-            dropped.setdefault("probe:dead", []).append(d)
-            continue
-
-        reason = match_junk_html(probe, psl, feed_matcher)
-        if reason is not None:
-            dropped.setdefault(reason, []).append(d)
-            if probe.status == "ok" and probe.combined_text():
-                junk_html_seeds.append(probe)
-            continue
-
-        if probe.status == "ok" and probe.combined_text():
-            score = domain_scores[d]
-            if score >= domain_clf.strict_threshold:
-                dropped.setdefault("ml:domain_high", []).append(d)
-                junk_html_seeds.append(probe)
-            else:
-                ambiguous_with_html.append(probe)
-                if score <= 0.15:
-                    legit_html_seeds.append(probe)
-        else:
-            # 403 / Cloudflare challenge / non-HTML: never auto-drop as dead, use strict domain fallback.
-            ambiguous_no_html.append(d)
-
-    content_clf = ContentClassifier()
-    content_clf.fit(junk_html_seeds, legit_html_seeds)
-
-    if ambiguous_with_html:
-        c_scores = content_clf.predict_scores(ambiguous_with_html)
-        for probe, c_score in zip(ambiguous_with_html, c_scores):
-            if content_clf.fitted and c_score >= content_clf.threshold:
-                dropped.setdefault("ml:html_content", []).append(probe.domain)
-            else:
-                kept.append(probe.domain)
-
-    for d in ambiguous_no_html:
-        if domain_scores[d] >= domain_clf.strict_threshold:
-            dropped.setdefault("ml:domain_fallback", []).append(d)
-        else:
-            kept.append(d)
-
-    return kept, dropped

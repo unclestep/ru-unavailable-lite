@@ -1,9 +1,10 @@
-"""Deterministic domain filters: threat feeds, mirror clusters, and high-precision RU junk rules."""
+"""Deterministic domain filters, DGA/leetspeak detection, and similarity tainting."""
 
 from __future__ import annotations
 
 import re
 from collections import Counter
+from dataclasses import dataclass
 from typing import Iterable
 
 from .normalize import DomainMatcher, PSL
@@ -14,6 +15,7 @@ SKETCHY_TLDS = frozenset({
     "cyou", "quest", "rest", "lol", "pics", "bid", "loan", "gdn", "work",
     "casa", "xyz", "biz", "vu", "pw", "shop", "store", "live", "pro",
     "porn", "sex", "xxx", "adult", "gay", "webcam", "bet", "casino", "poker",
+    "bond", "mom", "love", "trade", "party", "date", "men", "fit",
 })
 
 ADULT_TLDS = frozenset({"porn", "sex", "xxx", "adult", "cam", "webcam", "gay"})
@@ -21,32 +23,55 @@ GAMBLING_TLDS = frozenset({"casino", "bet", "poker"})
 
 _RANDOM_SUFFIX_RE = re.compile(r"-(?:[a-z0-9]{2,6})$")
 _DIGITS_RE = re.compile(r"\d+")
+_LEETSPEAK_TOKEN_RE = re.compile(r"[a-z]+\d+[a-z]+")
+_CONSONANT_CLUSTER_RE = re.compile(r"[bcdfghjklmnpqrstvwxz]{5,}")
+
+_SAFE_ALNUM_TOKENS = frozenset({
+    "mp3", "mp4", "web3", "b2b", "b2c", "p2p", "k8s", "w3c", "w3schools",
+    "v2ray", "v2box", "h2o", "ipv4", "ipv6", "utf8", "base64", "x86", "x64",
+    "sha256", "md5", "http2", "http3", "html5", "css3", "es6", "ps4", "ps5",
+    "4pda", "3d", "24h", "365d", "i18n", "l10n", "a11y", "c2c", "g2a", "f1",
+})
 
 _GAMBLING_RE = re.compile(
     r"(?:casino|kazino|azino|vulkan|wulkan|vavada|1win|1xbet|1xlite|mostbet|"
-    r"melbet|pin-?up|admiralx|royalrussia|bezdep|slotozal|playfortuna|riobet|"
-    r"joycas|pokerdom|fonbet|olimpbet|parimatch|ggbet|bukmek|stavk|spinbetter|"
-    r"megapari|linebet|betwinner|888starz|dragonmoney|up-?x|gmsdeluxe|azart|"
-    r"jackpot|slots?(?:online|site|club|vip|777|\d)|betting)"
+    r"melbet|pin-?up|pinco|admiralx|royalrussia|bezdep|slotozal|playfortuna|"
+    r"riobet|joycas|pokerdom|chpokers|fonbet|olimpbet|parimatch|ggbet|bukmek|"
+    r"stavk|spinbetter|megapari|linebet|betwinner|888starz|dragonmoney|up-?x|"
+    r"gmsdeluxe|azart|jackpot|megaways|clusterpays|cabura|veegastars|vegastars|"
+    r"casebattle|clashofslots|slottgames|form-reg-promo-code|betting|"
+    r"slots?(?:online|site|club|vip|777|\d))"
 )
 
 _PORN_RE = re.compile(
     r"(?:porn|xxx|xvideo|xhamster|xnxx|redtube|youporn|chaturbate|stripchat|"
     r"bongacams|brazzers|hentai|milf|escort|prostit|putan|shlyuh|intim|dosug|"
     r"seks|ebal|ebka|trah|siski|pizda|livejasmin|camsoda|spankbang|tube8|"
-    r"adult(?:time|work|prime|ptv|chat)|gay(?:24|s\.|tube|porn|sex))"
+    r"anal(?:forum|foto|galore|planet|sex|porn)|bdsm|pussy|dickof|bitchwithdick|"
+    r"fetish|erotic|eroboom|sexfree|cosmosex|clicsex|forumosexe|gayerotic|"
+    r"runetki|teamskeet|naughtymag|boyfriendoncam|r-34|livegore|smolensklust|"
+    r"habarovsklust|manga18free|adult(?:time|work|prime|ptv|chat)|"
+    r"gay(?:24|s\.|tube|porn|sex|city|comics|tourist)|fap(?:ello|house|club|er))"
 )
 
 _PIRACY_KINO_RE = re.compile(
-    r"(?:lordfilm|lordserial|lord-?\d|seriallord|hdrezka|rezka|kinogo|kinokrad|"
-    r"kinoprofi|kinotochka|kinoknopka|kinozo|filmix|baskino|gidonline|"
-    r"seasonvar|zetflix|zagonka|doramatv|animego|anilibria|yummyanime|"
-    r"animebesst|fanserials|smotret-?onlain|multfilm)"
+    r"(?:lord-?film|lordserial|lord-?\d|seriallord|hdrezka|rezka|kinogo|kinokrad|"
+    r"kinoprofi|kinotochka|kinoknopka|kinobar|kinozo|filmix|baskino|gidonline|"
+    r"seasonvar|lostfilm|zetflix|zagonka|dorama(?:tv|on|\.)|animego|anilibria|"
+    r"yummyanime|animebesst|fanserials|smotret-?onlain|multfilm)"
+)
+
+_PROBIV_LEAKS_RE = re.compile(
+    r"(?:probiv|deanon|eyeofgod|sherlok|sherlockk|quickosint|osintkit|"
+    r"slivsklad|skladchinakursov|dolinakursov|shopkurs|freeaccount|hq-accounts)"
 )
 
 _ILLICIT_RU_RE = re.compile(
     r"(?:medspravk|spravki|propiska|chhastniy-zaym|zaem-|diplom-?kupit|"
-    r"kraken-|blacksprut|kladomg|hydra-?onion|semena-?konopli|growgoodbud)"
+    r"onliprava|kraken-|krakenoff|blacksprut|kladomg|hydra-?onion|"
+    r"semyanich|konoplisemena|marijuanagrowing|pyramidseeds|hohlandseeds|"
+    r"luna-seeds|seedstockers|torogrow|pevgrow|growgoodbud|rus-anabolik|"
+    r"vapeskidon|slimsigar|sigarus|onsigaret|tabachkaplus|bigrc|napas420|fenix24rc)"
 )
 
 
@@ -61,7 +86,7 @@ def build_stem_counts(domains: Iterable[str], psl: PSL) -> Counter[str]:
     counts: Counter[str] = Counter()
     for d in domains:
         stem = domain_stem(psl.sld(d))
-        if len(stem) >= 4:
+        if len(stem) >= 3:
             counts[stem] += 1
     return counts
 
@@ -78,6 +103,28 @@ def has_mirror_shape(domain: str, psl: PSL) -> bool:
     return False
 
 
+def dga_signals(domain: str, psl: PSL) -> dict[str, bool]:
+    """Detect DGA / leetspeak / random-character anomalies in the registrable label."""
+    sld = psl.sld(domain)
+    tokens = [t for t in re.split(r"[-_]", sld) if t]
+
+    leetspeak = any(
+        _LEETSPEAK_TOKEN_RE.search(t) and t not in _SAFE_ALNUM_TOKENS
+        for t in tokens
+    )
+    consonant_cluster = bool(_CONSONANT_CLUSTER_RE.search(sld))
+
+    letters = [ch for ch in sld if ch.isalpha()]
+    vowels = sum(ch in "aeiouy" for ch in letters)
+    low_vowels = len(letters) >= 8 and (vowels / len(letters)) < 0.15
+
+    return {
+        "leetspeak": leetspeak,
+        "consonant_cluster": consonant_cluster,
+        "low_vowels": low_vowels,
+    }
+
+
 def is_mirror_cluster(
     domain: str,
     psl: PSL,
@@ -85,7 +132,11 @@ def is_mirror_cluster(
     min_cluster: int = 10,
 ) -> bool:
     stem = domain_stem(psl.sld(domain))
-    if len(stem) < 4 or stem_counts[stem] < min_cluster:
+    if len(stem) < 3:
+        return False
+    # Require a slightly higher count for very short 3-char stems (e.g. cat, lev, rox).
+    threshold = max(min_cluster, 15) if len(stem) == 3 else min_cluster
+    if stem_counts[stem] < threshold:
         return False
     return has_mirror_shape(domain, psl)
 
@@ -104,9 +155,50 @@ def match_junk_domain_rule(domain: str, psl: PSL) -> str | None:
         return "rule:porn"
     if _PIRACY_KINO_RE.search(target):
         return "rule:piracy_kino"
+    if _PROBIV_LEAKS_RE.search(target):
+        return "rule:probiv_leaks"
     if _ILLICIT_RU_RE.search(target):
         return "rule:illicit_ru"
     return None
+
+
+@dataclass
+class TaintIndex:
+    """Tracks registrable roots and stems already seen in dropped junk domains."""
+
+    tainted_roots: set[str]
+    tainted_stems: Counter[str]
+
+    @classmethod
+    def build(
+        cls,
+        dropped_domains: Iterable[str],
+        psl: PSL,
+        allow_matcher: DomainMatcher,
+    ) -> "TaintIndex":
+        roots: set[str] = set()
+        stems: Counter[str] = Counter()
+
+        for d in dropped_domains:
+            if allow_matcher.match(d) or psl.is_public_suffix(d):
+                continue
+            reg = psl.registrable(d)
+            if not allow_matcher.match(reg) and not psl.is_public_suffix(reg):
+                roots.add(reg)
+            stem = domain_stem(psl.sld(d))
+            if len(stem) >= 3:
+                stems[stem] += 1
+
+        return cls(tainted_roots=roots, tainted_stems=stems)
+
+    def root_is_tainted(self, domain: str, psl: PSL) -> bool:
+        return psl.registrable(domain) in self.tainted_roots
+
+    def stem_drop_count(self, domain: str, psl: PSL) -> int:
+        stem = domain_stem(psl.sld(domain))
+        if len(stem) < 3:
+            return 0
+        return self.tainted_stems.get(stem, 0)
 
 
 def apply_deterministic_filters(
@@ -116,7 +208,7 @@ def apply_deterministic_filters(
     allow_matcher: DomainMatcher,
     stem_counts: Counter[str],
 ) -> tuple[list[str], dict[str, list[str]]]:
-    """Filter domains using allowlist, feeds, mirror clusters, and RU junk rules."""
+    """Filter domains using allowlist, feeds, mirror clusters, and strict RU junk rules."""
     kept: list[str] = []
     dropped: dict[str, list[str]] = {}
 
