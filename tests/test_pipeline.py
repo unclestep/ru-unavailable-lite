@@ -11,8 +11,17 @@ from pathlib import Path
 
 import numpy as np
 
-from rustrict.classifier import DomainClassifier, html_keyword_hits, match_hard_html_junk
-from rustrict.crux import CruxSnapshot, filter_by_crux, load_crux_snapshot, save_crux_snapshot
+from rustrict.classifier import (
+    DomainClassifier,
+    html_keyword_hits,
+    match_hard_html_junk,
+)
+from rustrict.crux import (
+    CruxSnapshot,
+    filter_by_crux,
+    load_crux_snapshot,
+    save_crux_snapshot,
+)
 from rustrict.dns_geo import CountryDB, DnsResult, is_ru_hosted
 from rustrict.export import (
     build_geoip_lists,
@@ -31,8 +40,8 @@ from rustrict.filters import (
     match_junk_domain_rule,
 )
 from rustrict.normalize import (
-    DomainMatcher,
     PSL,
+    DomainMatcher,
     dedup_by_coverage,
     filter_subdomain_farms,
     normalize_domain,
@@ -87,7 +96,9 @@ class TestNormalizeAndCrux(unittest.TestCase):
         self.assertEqual(self.psl.registrable("user.github.io"), "user.github.io")
 
     def test_normalize_domain(self) -> None:
-        self.assertEqual(normalize_domain("https://www.Example.COM:443/path?a=1"), "example.com")
+        self.assertEqual(
+            normalize_domain("https://www.Example.COM:443/path?a=1"), "example.com"
+        )
         self.assertEqual(normalize_domain("*.sub.test.org."), "sub.test.org")
         self.assertEqual(normalize_domain("пример.рф"), "xn--e1afmkfd.xn--p1ai")
         self.assertIsNone(normalize_domain("1.2.3.4"))
@@ -95,13 +106,21 @@ class TestNormalizeAndCrux(unittest.TestCase):
         self.assertIsNone(normalize_domain("ec2-1-2-3-4.compute.amazonaws.com"))
 
     def test_dedup_by_coverage(self) -> None:
-        got = dedup_by_coverage(["a.b.example.com", "example.com", "sub.example.com", "other.org"])
+        got = dedup_by_coverage(
+            ["a.b.example.com", "example.com", "sub.example.com", "other.org"]
+        )
         self.assertEqual(got, ["example.com", "other.org"])
 
     def test_filter_subdomain_farms_and_protection(self) -> None:
-        domains = [f"s{i}.orgs.biz" for i in range(8)] + ["good.orgs.biz", "clean.com", "api.clean.com"]
+        domains = [f"s{i}.orgs.biz" for i in range(8)] + [
+            "good.orgs.biz",
+            "clean.com",
+            "api.clean.com",
+        ]
         protected = DomainMatcher(["good.orgs.biz"])
-        kept, farms = filter_subdomain_farms(domains, self.psl, max_subdomains=5, protected=protected)
+        kept, farms = filter_subdomain_farms(
+            domains, self.psl, max_subdomains=5, protected=protected
+        )
         self.assertEqual(farms, {"orgs.biz": 9})
         self.assertEqual(sorted(kept), ["api.clean.com", "clean.com", "good.orgs.biz"])
 
@@ -151,8 +170,15 @@ class TestFiltersAndTaint(unittest.TestCase):
         self.assertFalse(dga_signals("meduza.io", self.psl)["leetspeak"])
 
     def test_taint_index_handles_3char_stems_and_private_psl(self) -> None:
-        dropped = ["cat-ilz24.cfd", "cat-woz23.cfd", "sub1.badroot.com", "evil.github.io"]
-        taint = TaintIndex.build(dropped, self.psl, allow_matcher=DomainMatcher(["good.com"]))
+        dropped = [
+            "cat-ilz24.cfd",
+            "cat-woz23.cfd",
+            "sub1.badroot.com",
+            "evil.github.io",
+        ]
+        taint = TaintIndex.build(
+            dropped, self.psl, allow_matcher=DomainMatcher(["good.com"])
+        )
 
         self.assertTrue(taint.root_is_tainted("sub2.badroot.com", self.psl))
         self.assertEqual(taint.stem_drop_count("cat-cjy43.top", self.psl), 2)
@@ -172,11 +198,21 @@ class TestFiltersAndTaint(unittest.TestCase):
         ]
         stems = build_stem_counts(raw, self.psl)
         self.assertEqual(domain_stem("admiralx-abc"), "admiralx")
-        self.assertTrue(is_mirror_cluster("admiralx-aaa.top", self.psl, stems, min_cluster=10))
-        self.assertEqual(match_junk_domain_rule("1go.casino", self.psl), "rule:gambling_tld")
-        self.assertEqual(match_junk_domain_rule("lord-film29gw.top", self.psl), "rule:piracy_kino")
-        self.assertEqual(match_junk_domain_rule("probivon.top", self.psl), "rule:probiv_leaks")
-        self.assertEqual(match_junk_domain_rule("vapeskidon.site", self.psl), "rule:illicit_ru")
+        self.assertTrue(
+            is_mirror_cluster("admiralx-aaa.top", self.psl, stems, min_cluster=10)
+        )
+        self.assertEqual(
+            match_junk_domain_rule("1go.casino", self.psl), "rule:gambling_tld"
+        )
+        self.assertEqual(
+            match_junk_domain_rule("lord-film29gw.top", self.psl), "rule:piracy_kino"
+        )
+        self.assertEqual(
+            match_junk_domain_rule("probivon.top", self.psl), "rule:probiv_leaks"
+        )
+        self.assertEqual(
+            match_junk_domain_rule("vapeskidon.site", self.psl), "rule:illicit_ru"
+        )
 
         kept, dropped = apply_deterministic_filters(
             raw,
@@ -196,18 +232,21 @@ class TestFiltersAndTaint(unittest.TestCase):
 class TestReputationAndRDAP(unittest.TestCase):
     def test_ip_asn_blocklists_and_cohosting(self) -> None:
         drop_ndjson = (
-            '{"cidr":"198.51.100.0/24","sblid":"SBL1"}\n'
-            '{"type":"metadata","count":1}\n'
+            '{"cidr":"198.51.100.0/24","sblid":"SBL1"}\n{"type":"metadata","count":1}\n'
         )
-        asndrop_ndjson = '{"asn":64512,"asname":"BULLETPROOF-AS"}\n{"type":"metadata"}\n'
+        asndrop_ndjson = (
+            '{"asn":64512,"asname":"BULLETPROOF-AS"}\n{"type":"metadata"}\n'
+        )
         firehol = "# comment\n203.0.113.0/24\n"
         asn_csv = (
             '1.0.0.0,1.0.0.255,13335,"CLOUDFLARENET - Cloudflare, Inc."\n'
-            '45.10.10.0,45.10.10.255,64512,BULLETPROOF-AS\n'
-            '91.200.1.0,91.200.1.255,55555,DEDICATED-HOST\n'
+            "45.10.10.0,45.10.10.255,64512,BULLETPROOF-AS\n"
+            "91.200.1.0,91.200.1.255,55555,DEDICATED-HOST\n"
         )
 
-        blocklist = IpBlocklist(parse_spamhaus_drop_ndjson(drop_ndjson) + parse_netset(firehol))
+        blocklist = IpBlocklist(
+            parse_spamhaus_drop_ndjson(drop_ndjson) + parse_netset(firehol)
+        )
         bad_asns = parse_spamhaus_asndrop_ndjson(asndrop_ndjson)
         asn_db = AsnDB(asn_csv)
         rep = IpReputation(asn_db, blocklist, bad_asns)
@@ -246,7 +285,7 @@ class TestProbeAndSSRF(unittest.TestCase):
             "172.16.0.5",
             "192.168.1.1",
             "100.64.0.1",
-            "0.0.0.0",
+            "0.0.0.0",  # nosec B104
             "::1",
             "fe80::1",
             "fc00::1",
@@ -273,21 +312,48 @@ class TestProbeAndSSRF(unittest.TestCase):
         self.assertIn("RTA-5042", meta["meta_rating"])
         self.assertNotIn("casino", meta["snippet"])
 
-        self.assertEqual(classify_probe_outcome(403, {"title": "", "meta_desc": "", "h1": "", "snippet": ""}), "challenge")
         self.assertEqual(
-            classify_probe_outcome(200, {"title": "Just a moment...", "meta_desc": "", "h1": "", "snippet": ""}),
+            classify_probe_outcome(
+                403, {"title": "", "meta_desc": "", "h1": "", "snippet": ""}
+            ),
             "challenge",
         )
         self.assertEqual(
-            classify_probe_outcome(200, {"title": "This domain is for sale", "meta_desc": "", "h1": "", "snippet": ""}),
+            classify_probe_outcome(
+                200,
+                {"title": "Just a moment...", "meta_desc": "", "h1": "", "snippet": ""},
+            ),
+            "challenge",
+        )
+        self.assertEqual(
+            classify_probe_outcome(
+                200,
+                {
+                    "title": "This domain is for sale",
+                    "meta_desc": "",
+                    "h1": "",
+                    "snippet": "",
+                },
+            ),
             "parked",
         )
-        self.assertEqual(classify_probe_outcome(404, {"title": "Not Found", "meta_desc": "", "h1": "", "snippet": ""}), "dead")
+        self.assertEqual(
+            classify_probe_outcome(
+                404, {"title": "Not Found", "meta_desc": "", "h1": "", "snippet": ""}
+            ),
+            "dead",
+        )
 
     def test_probe_cache_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "cache.json.gz"
-            rec = PageProbe(domain="example.com", status="ok", http_code=200, title="Hi", checked_at=123456)
+            rec = PageProbe(
+                domain="example.com",
+                status="ok",
+                http_code=200,
+                title="Hi",
+                checked_at=123456,
+            )
             save_probe_cache(p, {"example.com": rec})
             loaded = load_probe_cache(p)
             self.assertEqual(loaded["example.com"], rec)
@@ -308,15 +374,27 @@ class TestSemanticAndScoringEngine(unittest.TestCase):
         self.assertEqual(html_keyword_hits(news), ("gambling", 1))
         self.assertIsNone(match_hard_html_junk(news, self.psl, feeds))
 
-        cloaked = PageProbe(domain="clean.com", status="ok", final_host="evil-mirror.top", title="Hi")
-        self.assertEqual(match_hard_html_junk(cloaked, self.psl, feeds), "html:redirect_feed")
+        cloaked = PageProbe(
+            domain="clean.com", status="ok", final_host="evil-mirror.top", title="Hi"
+        )
+        self.assertEqual(
+            match_hard_html_junk(cloaked, self.psl, feeds), "html:redirect_feed"
+        )
 
-        adult = PageProbe(domain="tube.net", status="ok", meta_rating="RTA-5042-1996-1400-1577-RTA")
-        self.assertEqual(match_hard_html_junk(adult, self.psl, feeds), "html:meta_adult")
+        adult = PageProbe(
+            domain="tube.net", status="ok", meta_rating="RTA-5042-1996-1400-1577-RTA"
+        )
+        self.assertEqual(
+            match_hard_html_junk(adult, self.psl, feeds), "html:meta_adult"
+        )
 
     def test_unified_scoring_combines_semantic_rdap_mx_taint_and_ip(self) -> None:
-        junk_train = [f"vulkancasino{i}.top" for i in range(60)] + [f"free-porn-vid{i}.biz" for i in range(60)]
-        legit_train = [f"techjournal{i}.org" for i in range(60)] + [f"bankportal{i}.com" for i in range(60)]
+        junk_train = [f"vulkancasino{i}.top" for i in range(60)] + [
+            f"free-porn-vid{i}.biz" for i in range(60)
+        ]
+        legit_train = [f"techjournal{i}.org" for i in range(60)] + [
+            f"bankportal{i}.com" for i in range(60)
+        ]
         stems = build_stem_counts(junk_train, self.psl)
         clf = DomainClassifier(self.psl, stems)
         clf.fit(junk_train, legit_train)
@@ -326,9 +404,31 @@ class TestSemanticAndScoringEngine(unittest.TestCase):
             vecs = []
             for t in texts:
                 tl = t.lower()
-                if any(w in tl for w in ("казино", "слоты", "порно", "пробив", "сигарет", "вебкам", "онлайн бесплатно")):
+                if any(
+                    w in tl
+                    for w in (
+                        "казино",
+                        "слоты",
+                        "порно",
+                        "пробив",
+                        "сигарет",
+                        "вебкам",
+                        "онлайн бесплатно",
+                    )
+                ):
                     vecs.append([0.95, 0.05])
-                elif any(w in tl for w in ("новости", "журналист", "software", "форум", "библиотека", "vpn", "обзор")):
+                elif any(
+                    w in tl
+                    for w in (
+                        "новости",
+                        "журналист",
+                        "software",
+                        "форум",
+                        "библиотека",
+                        "vpn",
+                        "обзор",
+                    )
+                ):
                     vecs.append([0.05, 0.95])
                 else:
                     vecs.append([0.5, 0.5])
@@ -338,7 +438,9 @@ class TestSemanticAndScoringEngine(unittest.TestCase):
         self.assertEqual(len(JUNK_PROTOTYPES), 5)
         self.assertEqual(len(LEGIT_PROTOTYPES), 5)
 
-        taint = TaintIndex.build(["cat-a1.cfd", "cat-b2.cfd"], self.psl, DomainMatcher([]))
+        taint = TaintIndex.build(
+            ["cat-a1.cfd", "cat-b2.cfd"], self.psl, DomainMatcher([])
+        )
         ip_rep = IpReputation(
             asn_db=AsnDB("91.200.1.0,91.200.1.255,55555,HOST"),
             blocklist=IpBlocklist(["198.51.100.0/24"]),
@@ -347,28 +449,43 @@ class TestSemanticAndScoringEngine(unittest.TestCase):
         )
 
         candidates = [
-            "rutracker.org",          # allowlist -> KEEP
-            "news-portal.org",        # 1 casino keyword but legit semantic + top-50k -> KEEP
-            "cat-c3.top",             # tainted 3-char stem + sketchy TLD + tail CrUX -> DROP
-            "m4rsh-ev4-41.com",       # leetspeak + 403 grey-zone + new RDAP -> DROP
-            "mailspam.org",           # web dead + MX record -> DROP (mail_only_spam)
-            "cohosted-spam.top",      # dedicated junk IP + sketchy TLD + tail CrUX -> DROP
-            "old-borderline.top",     # sketchy TLD + tail CrUX (+50) but >5y RDAP (-40) -> KEEP
-            "new-borderline.top",     # sketchy TLD + tail CrUX + weak semantic + <90d RDAP -> DROP
+            "rutracker.org",  # allowlist -> KEEP
+            "news-portal.org",  # 1 casino keyword but legit semantic + top-50k -> KEEP
+            "cat-c3.top",  # tainted 3-char stem + sketchy TLD + tail CrUX -> DROP
+            "m4rsh-ev4-41.com",  # leetspeak + 403 grey-zone + new RDAP -> DROP
+            "mailspam.org",  # web dead + MX record -> DROP (mail_only_spam)
+            "cohosted-spam.top",  # dedicated junk IP + sketchy TLD + tail CrUX -> DROP
+            "old-borderline.top",  # sketchy TLD + tail CrUX (+50) but >5y RDAP (-40) -> KEEP
+            "new-borderline.top",  # sketchy TLD + tail CrUX + weak semantic + <90d RDAP -> DROP
         ]
         probes = {
-            "rutracker.org": PageProbe(domain="rutracker.org", status="challenge", http_code=403),
+            "rutracker.org": PageProbe(
+                domain="rutracker.org", status="challenge", http_code=403
+            ),
             "news-portal.org": PageProbe(
                 domain="news-portal.org",
                 status="ok",
                 http_code=200,
                 title="Независимые новости: обзор налогов на онлайн-казино",
             ),
-            "cat-c3.top": PageProbe(domain="cat-c3.top", status="challenge", http_code=403),
-            "m4rsh-ev4-41.com": PageProbe(domain="m4rsh-ev4-41.com", status="challenge", http_code=403),
-            "mailspam.org": PageProbe(domain="mailspam.org", status="dead", http_code=0),
-            "cohosted-spam.top": PageProbe(domain="cohosted-spam.top", status="challenge", http_code=403),
-            "old-borderline.top": PageProbe(domain="old-borderline.top", status="ok", http_code=200, title="Old personal project"),
+            "cat-c3.top": PageProbe(
+                domain="cat-c3.top", status="challenge", http_code=403
+            ),
+            "m4rsh-ev4-41.com": PageProbe(
+                domain="m4rsh-ev4-41.com", status="challenge", http_code=403
+            ),
+            "mailspam.org": PageProbe(
+                domain="mailspam.org", status="dead", http_code=0
+            ),
+            "cohosted-spam.top": PageProbe(
+                domain="cohosted-spam.top", status="challenge", http_code=403
+            ),
+            "old-borderline.top": PageProbe(
+                domain="old-borderline.top",
+                status="ok",
+                http_code=200,
+                title="Old personal project",
+            ),
             "new-borderline.top": PageProbe(
                 domain="new-borderline.top",
                 status="ok",
@@ -414,7 +531,9 @@ class TestSemanticAndScoringEngine(unittest.TestCase):
         )
 
         by_dom = {r.domain: r for r in results}
-        self.assertEqual(sorted(kept), ["news-portal.org", "old-borderline.top", "rutracker.org"])
+        self.assertEqual(
+            sorted(kept), ["news-portal.org", "old-borderline.top", "rutracker.org"]
+        )
         self.assertEqual(by_dom["mailspam.org"].primary_reason, "mail_only_spam")
         self.assertTrue(by_dom["cat-c3.top"].dropped)
         self.assertTrue(by_dom["m4rsh-ev4-41.com"].dropped)
@@ -450,9 +569,16 @@ class TestExportAndCidrs(unittest.TestCase):
         )
         self.assertNotIn("CLOUDFLARE", geoip_lists)
         self.assertEqual(geoip_lists["GOOGLE"], google_first_party)
-        self.assertEqual(geoip_lists["TELEGRAM"], [(ipaddress.IPv4Address("91.108.8.0").packed, 21)])
+        self.assertEqual(
+            geoip_lists["TELEGRAM"], [(ipaddress.IPv4Address("91.108.8.0").packed, 21)]
+        )
 
-        rules = build_split_rules("202611240900", ["meduza.io", "sub.example.com"], ["example.com"], geoip_lists)
+        rules = build_split_rules(
+            "202611240900",
+            ["meduza.io", "sub.example.com"],
+            ["example.com"],
+            geoip_lists,
+        )
         self.assertEqual(rules["domains"], ["domain:example.com", "domain:meduza.io"])
         self.assertNotIn("10.0.0.0/8", rules["ips"])
         self.assertIn("142.250.0.0/15", rules["ips"])
@@ -460,20 +586,35 @@ class TestExportAndCidrs(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             out = Path(td)
-            write_artifacts(out, "202611240900", ["meduza.io"], ["example.com"], geoip_lists, {"ok": True})
+            write_artifacts(
+                out,
+                "202611240900",
+                ["meduza.io"],
+                ["example.com"],
+                geoip_lists,
+                {"ok": True},
+            )
 
             self.assertEqual(
                 decode_geosite((out / "geosite.dat").read_bytes()),
                 {"RU-BLOCKED": ["meduza.io"], "RU-FORBIDDEN": ["example.com"]},
             )
-            self.assertEqual(decode_geoip((out / "geoip.dat").read_bytes()), geoip_lists)
+            self.assertEqual(
+                decode_geoip((out / "geoip.dat").read_bytes()), geoip_lists
+            )
 
-            parsed_split = json.loads((out / "split-rules.json").read_text(encoding="utf-8"))
+            parsed_split = json.loads(
+                (out / "split-rules.json").read_text(encoding="utf-8")
+            )
             self.assertEqual(parsed_split["version"], "202611240900")
 
-            for line in (out / "checksums.sha256sum").read_text(encoding="utf-8").splitlines():
+            for line in (
+                (out / "checksums.sha256sum").read_text(encoding="utf-8").splitlines()
+            ):
                 digest, name = line.split("  ", 1)
-                self.assertEqual(hashlib.sha256((out / name).read_bytes()).hexdigest(), digest)
+                self.assertEqual(
+                    hashlib.sha256((out / name).read_bytes()).hexdigest(), digest
+                )
 
 
 if __name__ == "__main__":

@@ -6,8 +6,8 @@ import hashlib
 import ipaddress
 import json
 import logging
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from .normalize import PSL, dedup_by_coverage
 
@@ -132,7 +132,9 @@ def decode_geoip(raw: bytes) -> dict[str, list[tuple[bytes, int]]]:
     return result
 
 
-def collapse_packed_cidrs(pairs: Iterable[tuple[bytes, int]]) -> list[tuple[bytes, int]]:
+def collapse_packed_cidrs(
+    pairs: Iterable[tuple[bytes, int]],
+) -> list[tuple[bytes, int]]:
     v4, v6 = [], []
     for packed, prefix in pairs:
         net = ipaddress.ip_network((packed, prefix), strict=False)
@@ -141,8 +143,14 @@ def collapse_packed_cidrs(pairs: Iterable[tuple[bytes, int]]) -> list[tuple[byte
         else:
             v6.append(net)
 
-    out = [(n.network_address.packed, n.prefixlen) for n in ipaddress.collapse_addresses(v4)]
-    out.extend((n.network_address.packed, n.prefixlen) for n in ipaddress.collapse_addresses(v6))
+    out = [
+        (n.network_address.packed, n.prefixlen)
+        for n in ipaddress.collapse_addresses(v4)
+    ]
+    out.extend(
+        (n.network_address.packed, n.prefixlen)
+        for n in ipaddress.collapse_addresses(v6)
+    )
     return out
 
 
@@ -168,7 +176,9 @@ def build_geoip_lists(
 
     missing = [code for code in GEOIP_REQUIRED_FOREIGN if not foreign_geoip.get(code)]
     if missing:
-        raise ValueError(f"Foreign geoip.dat missing required categories: {', '.join(missing)}")
+        raise ValueError(
+            f"Foreign geoip.dat missing required categories: {', '.join(missing)}"
+        )
     for code in GEOIP_REQUIRED_FOREIGN:
         selected[code] = foreign_geoip[code]
 
@@ -213,13 +223,17 @@ def write_artifacts(
 ) -> dict[str, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    geosite_bytes = encode_geosite({"ru-blocked": ru_blocked, "ru-forbidden": ru_forbidden})
+    geosite_bytes = encode_geosite(
+        {"ru-blocked": ru_blocked, "ru-forbidden": ru_forbidden}
+    )
     decoded_gs = decode_geosite(geosite_bytes)
-    assert decoded_gs == {"RU-BLOCKED": ru_blocked, "RU-FORBIDDEN": ru_forbidden}
+    if decoded_gs != {"RU-BLOCKED": ru_blocked, "RU-FORBIDDEN": ru_forbidden}:
+        raise RuntimeError("geosite.dat round-trip verification failed")
 
     geoip_bytes = encode_geoip(geoip_lists)
     decoded_gi = decode_geoip(geoip_bytes)
-    assert decoded_gi == geoip_lists
+    if decoded_gi != geoip_lists:
+        raise RuntimeError("geoip.dat round-trip verification failed")
 
     split_rules = build_split_rules(version, ru_blocked, ru_forbidden, geoip_lists)
 
@@ -256,7 +270,9 @@ def write_artifacts(
             "geoip_categories": {k: len(v) for k, v in geoip_lists.items()},
         },
     }
-    stats_path.write_text(json.dumps(stats_out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    stats_path.write_text(
+        json.dumps(stats_out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
     written["stats.json"] = stats_path
 
     log.info(

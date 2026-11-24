@@ -13,13 +13,18 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .classifier import DomainClassifier
-from .crux import domain_crux_ranks, fetch_crux_snapshot, load_crux_snapshot, save_crux_snapshot
+from .crux import (
+    domain_crux_ranks,
+    fetch_crux_snapshot,
+    load_crux_snapshot,
+    save_crux_snapshot,
+)
 from .dns_geo import CountryDB, check_mx_records, is_ru_hosted, resolve_domains
 from .export import build_geoip_lists, decode_geoip, write_artifacts
 from .filters import TaintIndex, apply_deterministic_filters, build_stem_counts
 from .normalize import (
-    DomainMatcher,
     PSL,
+    DomainMatcher,
     dedup_by_coverage,
     filter_subdomain_farms,
     load_domain_file,
@@ -74,16 +79,25 @@ def _strip_secrets_from_env() -> None:
 
 
 def _write_audit(path: Path, results: list[ScoreResult]) -> None:
-    kept_scored = sorted((r for r in results if not r.dropped and r.primary_reason != "allowlist"), key=lambda r: -r.score)
-    dropped_scored = sorted((r for r in results if r.dropped and r.score < 200), key=lambda r: r.score)
+    kept_scored = sorted(
+        (r for r in results if not r.dropped and r.primary_reason != "allowlist"),
+        key=lambda r: -r.score,
+    )
+    dropped_scored = sorted(
+        (r for r in results if r.dropped and r.score < 200), key=lambda r: r.score
+    )
 
     audit = {
-        "dropped_by_reason": dict(Counter(r.primary_reason for r in results if r.dropped).most_common()),
+        "dropped_by_reason": dict(
+            Counter(r.primary_reason for r in results if r.dropped).most_common()
+        ),
         "borderline_kept_top60": [asdict(r) for r in kept_scored[:60]],
         "borderline_dropped_top60": [asdict(r) for r in dropped_scored[:60]],
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(audit, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(audit, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def stage_build(
@@ -115,7 +129,9 @@ def stage_build(
     country_db = CountryDB(geo_v4_csv, geo_v6_csv)
 
     ip_rep = fetch_ip_reputation(auth_session)
-    foreign_geoip = decode_geoip(auth_session.get(FOREIGN_GEOIP_URL, timeout=300).content)
+    foreign_geoip = decode_geoip(
+        auth_session.get(FOREIGN_GEOIP_URL, timeout=300).content
+    )
     google_cidrs = fetch_google_first_party_cidrs(auth_session)
 
     # Close authenticated session and scrub tokens before any untrusted HTTP crawl.
@@ -124,9 +140,16 @@ def stage_build(
 
     # 2. Normalize and deduplicate both branches.
     allowlist = load_domain_file(allowlist_path)
-    ru_forbidden = dedup_by_coverage(d for x in raw["ru-forbidden"] if (d := normalize_domain(x)))
-    ru_blocked_all = dedup_by_coverage(d for x in raw["ru-blocked"] if (d := normalize_domain(x)))
-    stats["raw_normalized"] = {"ru_blocked": len(ru_blocked_all), "ru_forbidden": len(ru_forbidden)}
+    ru_forbidden = dedup_by_coverage(
+        d for x in raw["ru-forbidden"] if (d := normalize_domain(x))
+    )
+    ru_blocked_all = dedup_by_coverage(
+        d for x in raw["ru-blocked"] if (d := normalize_domain(x))
+    )
+    stats["raw_normalized"] = {
+        "ru_blocked": len(ru_blocked_all),
+        "ru_forbidden": len(ru_forbidden),
+    }
 
     stem_counts = build_stem_counts(ru_blocked_all, psl)
 
@@ -135,14 +158,22 @@ def stage_build(
     forb_ru = [d for d in ru_forbidden if is_ru_hosted(forb_dns[d].ips, country_db)]
     ru_forbidden = [d for d in ru_forbidden if d not in set(forb_ru)]
     stats["ru_forbidden_dropped_ru_host"] = len(forb_ru)
-    log.info("ru-forbidden: kept %d, dropped RU-hosted %d", len(ru_forbidden), len(forb_ru))
+    log.info(
+        "ru-forbidden: kept %d, dropped RU-hosted %d", len(ru_forbidden), len(forb_ru)
+    )
 
     allow_matcher = DomainMatcher(allowlist | set(ru_forbidden))
 
     # 4. ru-blocked: remove subdomain farms, then filter by CrUX RU popularity.
-    ru_blocked, farms = filter_subdomain_farms(ru_blocked_all, psl, max_subdomains=5, protected=allow_matcher)
+    ru_blocked, farms = filter_subdomain_farms(
+        ru_blocked_all, psl, max_subdomains=5, protected=allow_matcher
+    )
     stats["subdomain_farms_dropped"] = sum(farms.values())
-    log.info("Subdomain farms dropped: %d domains across %d roots", sum(farms.values()), len(farms))
+    log.info(
+        "Subdomain farms dropped: %d domains across %d roots",
+        sum(farms.values()),
+        len(farms),
+    )
 
     crux_rank_map = domain_crux_ranks(ru_blocked, crux, psl)
     ru_blocked = list(crux_rank_map)
@@ -164,7 +195,12 @@ def stage_build(
         alive_blocked.append(d)
     ru_blocked = alive_blocked
     stats["dns_geo_dropped"] = {"dead": dead_cnt, "ru_hosted": ru_host_cnt}
-    log.info("ru-blocked after DNS+GeoIP: %d (dead=%d, ru_hosted=%d)", len(ru_blocked), dead_cnt, ru_host_cnt)
+    log.info(
+        "ru-blocked after DNS+GeoIP: %d (dead=%d, ru_hosted=%d)",
+        len(ru_blocked),
+        dead_cnt,
+        ru_host_cnt,
+    )
 
     # 6. Deterministic filters: feeds + strict RU junk rules + mirror clusters.
     all_junk_feed = set().union(*junk_feeds.values()) if junk_feeds else set()
@@ -173,7 +209,11 @@ def stage_build(
         ru_blocked, psl, feed_matcher, allow_matcher, stem_counts
     )
     stats["deterministic_dropped"] = {k: len(v) for k, v in det_dropped.items()}
-    log.info("ru-blocked after deterministic filters: %d (%s)", len(ru_blocked), stats["deterministic_dropped"])
+    log.info(
+        "ru-blocked after deterministic filters: %d (%s)",
+        len(ru_blocked),
+        stats["deterministic_dropped"],
+    )
 
     # Build similarity taint index & dedicated-IP co-hosting taint from already-dropped junk.
     all_det_dropped = [d for items in det_dropped.values() for d in items]
@@ -184,9 +224,15 @@ def stage_build(
     stats["tainted_cohosted_ips"] = len(cohosted_ips)
 
     # 7. Train Domain+Structural ML classifier.
-    rng = random.Random(42)
+    rng = random.Random(42)  # nosec B311
     train_junk_set: set[str] = set()
-    for key in ("ut1/gambling", "ut1/drogue", "ut1/cryptojacking", "ut1/ddos", "ut1/stalkerware"):
+    for key in (
+        "ut1/gambling",
+        "ut1/drogue",
+        "ut1/cryptojacking",
+        "ut1/ddos",
+        "ut1/stalkerware",
+    ):
         train_junk_set.update(junk_feeds.get(key, set()))
     for key in ("porn", "gambling_extra", "hagezi/tif"):
         items = sorted(junk_feeds.get(key, set()))
@@ -201,7 +247,9 @@ def stage_build(
     train_junk_set -= train_legit_set
 
     domain_clf = DomainClassifier(psl, stem_counts)
-    stats["domain_ml_auc"] = round(domain_clf.fit(sorted(train_junk_set), sorted(train_legit_set)), 4)
+    stats["domain_ml_auc"] = round(
+        domain_clf.fit(sorted(train_junk_set), sorted(train_legit_set)), 4
+    )
 
     # 8. SSRF-safe HTML probe + MX check on web-dead/non-HTML domains.
     probes: dict[str, PageProbe] = {}
@@ -210,17 +258,27 @@ def stage_build(
     if not skip_probe:
         seed_sample = rng.sample(clean_forbidden, min(len(clean_forbidden), 400))
         to_probe = sorted(set(ru_blocked) | set(seed_sample))
-        probes = probe_domains(to_probe, cache_path=cache_path, concurrency=probe_concurrency)
+        probes = probe_domains(
+            to_probe, cache_path=cache_path, concurrency=probe_concurrency
+        )
         legit_seed_probes = [
             probes[d]
             for d in seed_sample
             if d in probes and probes[d].status == "ok" and probes[d].combined_text()
         ]
 
-        no_web = [d for d in ru_blocked if d in probes and probes[d].status in ("dead", "non_html")]
+        no_web = [
+            d
+            for d in ru_blocked
+            if d in probes and probes[d].status in ("dead", "non_html")
+        ]
         if no_web:
             mx_domains = check_mx_records(no_web)
-            log.info("MX check on %d web-dead/non-HTML domains: %d have MX", len(no_web), len(mx_domains))
+            log.info(
+                "MX check on %d web-dead/non-HTML domains: %d have MX",
+                len(no_web),
+                len(mx_domains),
+            )
 
     # 9. Unified weighted scoring (HTML + Semantic Zero-Shot + ML + DGA + Taint + IP/ASN + MX + RDAP).
     semantic_clf = None if (skip_probe or skip_semantic) else SemanticClassifier()
@@ -246,9 +304,13 @@ def stage_build(
         legit_seed_probes=legit_seed_probes,
         rdap_age_fn=rdap_fn,
     )
-    score_drop_counts = dict(Counter(r.primary_reason for r in score_results if r.dropped).most_common())
+    score_drop_counts = dict(
+        Counter(r.primary_reason for r in score_results if r.dropped).most_common()
+    )
     stats["scoring_dropped"] = score_drop_counts
-    log.info("ru-blocked after unified scoring: %d (%s)", len(ru_blocked), score_drop_counts)
+    log.info(
+        "ru-blocked after unified scoring: %d (%s)", len(ru_blocked), score_drop_counts
+    )
 
     _write_audit(work_dir / "audit.json", score_results)
 
@@ -257,28 +319,51 @@ def stage_build(
     forb_matcher = DomainMatcher(ru_forbidden)
     ru_blocked = [d for d in dedup_by_coverage(ru_blocked) if not forb_matcher.match(d)]
 
-    geoip_lists = build_geoip_lists(foreign_geoip, google_cidrs, [*ru_blocked, *ru_forbidden], psl)
+    geoip_lists = build_geoip_lists(
+        foreign_geoip, google_cidrs, [*ru_blocked, *ru_forbidden], psl
+    )
     write_artifacts(out_dir, version, ru_blocked, ru_forbidden, geoip_lists, stats)
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Build rustrict routing lists")
     parser.add_argument("--stage", choices=("crux", "build", "all"), default="all")
-    parser.add_argument("--project-id", default=os.environ.get("GOOGLE_CLOUD_PROJECT", "rkn-block-filtering"))
+    parser.add_argument(
+        "--project-id",
+        default=os.environ.get("GOOGLE_CLOUD_PROJECT", "rkn-block-filtering"),
+    )
     parser.add_argument("--rank-max", type=int, default=1_000_000)
     parser.add_argument("--work-dir", type=Path, default=Path("work"))
     parser.add_argument("--out-dir", type=Path, default=Path("publish"))
     parser.add_argument("--allowlist", type=Path, default=Path("allowlist.txt"))
-    parser.add_argument("--cache-file", type=Path, default=Path("work/probe-cache.json.gz"))
-    parser.add_argument("--rdap-cache", type=Path, default=Path("work/rdap-cache.json.gz"))
-    parser.add_argument("--version", default=dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d%H%M"))
-    parser.add_argument("--skip-probe", action="store_true", help="Skip HTTP HTML probing")
-    parser.add_argument("--skip-semantic", action="store_true", help="Skip ONNX semantic zero-shot scoring")
-    parser.add_argument("--skip-rdap", action="store_true", help="Skip RDAP domain age queries")
+    parser.add_argument(
+        "--cache-file", type=Path, default=Path("work/probe-cache.json.gz")
+    )
+    parser.add_argument(
+        "--rdap-cache", type=Path, default=Path("work/rdap-cache.json.gz")
+    )
+    parser.add_argument(
+        "--version", default=dt.datetime.now(dt.UTC).strftime("%Y%m%d%H%M")
+    )
+    parser.add_argument(
+        "--skip-probe", action="store_true", help="Skip HTTP HTML probing"
+    )
+    parser.add_argument(
+        "--skip-semantic",
+        action="store_true",
+        help="Skip ONNX semantic zero-shot scoring",
+    )
+    parser.add_argument(
+        "--skip-rdap", action="store_true", help="Skip RDAP domain age queries"
+    )
     parser.add_argument("--concurrency", type=int, default=80)
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
     if args.stage in ("crux", "all"):
         stage_crux(args.project_id, args.work_dir, args.rank_max)

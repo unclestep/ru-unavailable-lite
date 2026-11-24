@@ -5,8 +5,8 @@ from __future__ import annotations
 import ipaddress
 import re
 from collections import Counter
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 from urllib.parse import urlsplit
 
 _JUNK_HOST_RE = re.compile(
@@ -109,17 +109,15 @@ def normalize_domain(entry: str) -> str | None:
     if "@" in entry:
         entry = entry.rsplit("@", 1)[-1]
     entry = entry.split(":", 1)[0].strip(".")
-    if entry.startswith("*."):
-        entry = entry[2:]
-    if entry.startswith("www."):
-        entry = entry[4:]
+    entry = entry.removeprefix("*.")
+    entry = entry.removeprefix("www.")
     if not entry or "." not in entry:
         return None
 
     if not entry.isascii():
         try:
             entry = entry.encode("idna").decode("ascii")
-        except Exception:
+        except UnicodeError:
             return None
 
     try:

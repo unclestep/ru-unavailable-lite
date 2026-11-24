@@ -146,7 +146,9 @@ class _MetadataParser(HTMLParser):
             self._in_h1 = True
         elif t == "meta":
             attr_map = {k.lower(): (v or "") for k, v in attrs}
-            name = (attr_map.get("name") or attr_map.get("property") or "").lower().strip()
+            name = (
+                (attr_map.get("name") or attr_map.get("property") or "").lower().strip()
+            )
             content = attr_map.get("content", "").strip()
             if not content:
                 return
@@ -159,7 +161,10 @@ class _MetadataParser(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         t = tag.lower()
-        if t in ("script", "style", "noscript", "svg", "template") and self._skip_depth > 0:
+        if (
+            t in ("script", "style", "noscript", "svg", "template")
+            and self._skip_depth > 0
+        ):
             self._skip_depth -= 1
         elif t == "title":
             self._in_title = False
@@ -182,13 +187,15 @@ class _MetadataParser(HTMLParser):
             self._body_len += len(text) + 1
 
 
-def parse_html_metadata(html_bytes: bytes, charset: str | None = None) -> dict[str, str]:
+def parse_html_metadata(
+    html_bytes: bytes, charset: str | None = None
+) -> dict[str, str]:
     text = html_bytes.decode(charset or "utf-8", errors="replace")
     parser = _MetadataParser()
     try:
         parser.feed(text)
-    except Exception:
-        pass
+    except (ValueError, AssertionError) as exc:
+        log.debug("HTML parser stopped early: %s", exc)
 
     def clean(parts: list[str], limit: int) -> str:
         return _WS_RE.sub(" ", " ".join(parts)).strip()[:limit]
@@ -252,12 +259,20 @@ async def _fetch_with_redirects(
                 if len(buf) >= MAX_BODY_BYTES:
                     break
 
-            return resp.status, (parsed.hostname or "").lower(), ctype, bytes(buf[:MAX_BODY_BYTES]), resp.charset
+            return (
+                resp.status,
+                (parsed.hostname or "").lower(),
+                ctype,
+                bytes(buf[:MAX_BODY_BYTES]),
+                resp.charset,
+            )
 
     return 310, (urlsplit(url).hostname or "").lower(), "", b"", None
 
 
-async def _probe_one(session: aiohttp.ClientSession, domain: str, now: int) -> PageProbe:
+async def _probe_one(
+    session: aiohttp.ClientSession, domain: str, now: int
+) -> PageProbe:
     last_code = 0
     last_host = domain
 
@@ -295,7 +310,8 @@ async def _probe_one(session: aiohttp.ClientSession, domain: str, now: int) -> P
             )
         except SSRFBlockedError:
             return PageProbe(domain=domain, status="blocked_ssrf", checked_at=now)
-        except Exception:
+        except (aiohttp.ClientError, TimeoutError, OSError, UnicodeError) as exc:
+            log.debug("Probe %s://%s failed: %s", scheme, domain, exc)
             continue
 
     return PageProbe(
@@ -314,7 +330,7 @@ def load_probe_cache(path: Path | None) -> dict[str, PageProbe]:
         with gzip.open(path, "rt", encoding="utf-8") as f:
             raw = json.load(f)
         return {d: PageProbe(**rec) for d, rec in raw.items()}
-    except Exception as exc:
+    except (OSError, json.JSONDecodeError, TypeError, KeyError, ValueError) as exc:
         log.warning("Failed to load probe cache %s: %s", path, exc)
         return {}
 
@@ -328,7 +344,11 @@ def save_probe_cache(path: Path | None, cache: dict[str, PageProbe]) -> None:
 
 
 def _is_cache_fresh(probe: PageProbe, now: int) -> bool:
-    ttl = CACHE_TTL_DEAD_SEC if probe.status in ("dead", "blocked_ssrf") else CACHE_TTL_OK_SEC
+    ttl = (
+        CACHE_TTL_DEAD_SEC
+        if probe.status in ("dead", "blocked_ssrf")
+        else CACHE_TTL_OK_SEC
+    )
     return (now - probe.checked_at) < ttl
 
 

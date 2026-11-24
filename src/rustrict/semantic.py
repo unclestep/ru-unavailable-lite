@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Callable, Iterable
 
 import numpy as np
 
@@ -113,9 +113,13 @@ class SemanticClassifier:
 
     def _ensure_prototypes(self) -> None:
         if self._junk_vecs is None:
-            self._junk_vecs = self._embed([JUNK_PROTOTYPES[k] for k in self._junk_names])
+            self._junk_vecs = self._embed(
+                [JUNK_PROTOTYPES[k] for k in self._junk_names]
+            )
         if self._legit_vecs is None:
-            self._legit_vecs = self._embed([LEGIT_PROTOTYPES[k] for k in self._legit_names])
+            self._legit_vecs = self._embed(
+                [LEGIT_PROTOTYPES[k] for k in self._legit_names]
+            )
 
     def score_probes(self, probes: Iterable[PageProbe]) -> dict[str, SemanticScore]:
         items = [p for p in probes if p.status == "ok" and len(p.combined_text()) >= 15]
@@ -123,7 +127,8 @@ class SemanticClassifier:
             return {}
 
         self._ensure_prototypes()
-        assert self._junk_vecs is not None and self._legit_vecs is not None
+        if self._junk_vecs is None or self._legit_vecs is None:
+            raise RuntimeError("Semantic prototype vectors were not initialized")
 
         docs = [f"{p.domain}: {p.combined_text()[:500]}" for p in items]
         doc_vecs = self._embed(docs)

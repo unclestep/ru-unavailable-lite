@@ -8,7 +8,8 @@ on:
     branches:
       - main
     paths-ignore:
-      - "**/README.md"
+      - "**/*.md"
+      - "LICENSE"
 
 permissions:
   contents: write
@@ -27,10 +28,12 @@ jobs:
           echo "RELEASE_NAME=Released on ${TAG}" >> "$GITHUB_ENV"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
           cache: pip
@@ -42,7 +45,7 @@ jobs:
         run: PYTHONPATH=src python -m unittest discover -s tests -v
 
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           project_id: rkn-block-filtering
           workload_identity_provider: projects/500205253986/locations/global/workloadIdentityPools/github-pool/providers/github-provider
@@ -57,7 +60,7 @@ jobs:
           echo "GOOGLE_APPLICATION_CREDENTIALS=" >> "$GITHUB_ENV"
 
       - name: Restore probe and RDAP caches
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             work/probe-cache.json.gz
@@ -67,7 +70,7 @@ jobs:
             probe-rdap-cache-
 
       - name: Cache fastembed ONNX model
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/fastembed
           key: fastembed-multilingual-minilm-v1
@@ -84,11 +87,11 @@ jobs:
             --allowlist allowlist.txt \
             --cache-file work/probe-cache.json.gz \
             --rdap-cache work/rdap-cache.json.gz \
-            --version "${{ env.TAG_NAME }}"
+            --version "$TAG_NAME"
 
       - name: Upload scoring audit
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: scoring-audit
           path: work/audit.json
@@ -107,15 +110,18 @@ jobs:
           ls -lh publish/
 
       - name: Release and upload assets
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          release_name: ${{ env.RELEASE_NAME }}
-          tag: ${{ env.TAG_NAME }}
-          file_glob: true
-          file: ./publish/*
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$TAG_NAME" publish/* \
+            --title "$RELEASE_NAME" \
+            --notes ""
 
       - name: Push assets to release branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
+          GH_REPO: ${{ github.repository }}
         run: |
           cd publish
           git init
@@ -123,6 +129,6 @@ jobs:
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b release
           git add .
-          git commit -m "${{ env.RELEASE_NAME }}"
-          git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
+          git commit -m "$RELEASE_NAME"
+          git remote add origin "https://${GH_ACTOR}:${GH_TOKEN}@github.com/${GH_REPO}"
           git push -f -u origin release

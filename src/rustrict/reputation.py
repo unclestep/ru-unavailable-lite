@@ -13,10 +13,11 @@ import json
 import logging
 import time
 from collections import Counter
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import aiohttp
+import requests
 
 from .sources import (
     FIREHOL_L1_URL,
@@ -31,21 +32,23 @@ from .sources import (
 log = logging.getLogger(__name__)
 
 # Shared CDN / cloud / DDoS-protection ASNs excluded from dedicated-IP co-hosting taint.
-SHARED_CDN_ASNS = frozenset({
-    13335,   # Cloudflare
-    54113,   # Fastly
-    16509,   # Amazon AWS / CloudFront
-    14618,   # Amazon AWS
-    15169,   # Google
-    396982,  # Google Cloud
-    8075,    # Microsoft Azure
-    20940,   # Akamai
-    16625,   # Akamai
-    32934,   # Meta
-    19551,   # Imperva / Incapsula
-    57724,   # DDoS-Guard
-    132892,  # Cloudflare China
-})
+SHARED_CDN_ASNS = frozenset(
+    {
+        13335,  # Cloudflare
+        54113,  # Fastly
+        16509,  # Amazon AWS / CloudFront
+        14618,  # Amazon AWS
+        15169,  # Google
+        396982,  # Google Cloud
+        8075,  # Microsoft Azure
+        20940,  # Akamai
+        16625,  # Akamai
+        32934,  # Meta
+        19551,  # Imperva / Incapsula
+        57724,  # DDoS-Guard
+        132892,  # Cloudflare China
+    }
+)
 
 RDAP_URL = "https://rdap.org/domain/{}"
 RDAP_CACHE_TTL_SEC = 90 * 86_400
@@ -56,8 +59,12 @@ class AsnDB:
     """Binary-search IPv4/IPv6-to-ASN lookup backed by iptoasn CSV files."""
 
     def __init__(self, ipv4_csv: str = "", ipv6_csv: str = "") -> None:
-        self._v4 = self._parse(ipv4_csv, ipaddress.IPv4Address) if ipv4_csv else ([], [], [])
-        self._v6 = self._parse(ipv6_csv, ipaddress.IPv6Address) if ipv6_csv else ([], [], [])
+        self._v4 = (
+            self._parse(ipv4_csv, ipaddress.IPv4Address) if ipv4_csv else ([], [], [])
+        )
+        self._v6 = (
+            self._parse(ipv6_csv, ipaddress.IPv6Address) if ipv6_csv else ([], [], [])
+        )
 
     @staticmethod
     def _parse(csv_text: str, addr_cls: type) -> tuple[list[int], list[int], list[int]]:
@@ -171,7 +178,9 @@ class IpReputation:
                     continue
                 counts[ip] += 1
 
-        self.cohosted_junk_ips = {ip: cnt for ip, cnt in counts.items() if cnt >= min_junk_per_ip}
+        self.cohosted_junk_ips = {
+            ip: cnt for ip, cnt in counts.items() if cnt >= min_junk_per_ip
+        }
         return self.cohosted_junk_ips
 
     def evaluate(self, ips: tuple[str, ...]) -> dict[str, bool]:
@@ -238,28 +247,30 @@ def fetch_ip_reputation(session) -> IpReputation:
     for url in (SPAMHAUS_DROP_V4_URL, SPAMHAUS_DROP_V6_URL):
         try:
             cidrs.extend(parse_spamhaus_drop_ndjson(session.get(url, timeout=60).text))
-        except Exception as exc:
+        except (requests.RequestException, ValueError) as exc:
             log.warning("Spamhaus DROP (%s) failed: %s", url, exc)
 
     try:
-        bad_asns = parse_spamhaus_asndrop_ndjson(session.get(SPAMHAUS_ASNDROP_URL, timeout=60).text)
-    except Exception as exc:
+        bad_asns = parse_spamhaus_asndrop_ndjson(
+            session.get(SPAMHAUS_ASNDROP_URL, timeout=60).text
+        )
+    except (requests.RequestException, ValueError) as exc:
         log.warning("Spamhaus ASN-DROP failed: %s", exc)
 
     for url in (FIREHOL_L1_URL, FIREHOL_L2_URL):
         try:
             cidrs.extend(parse_netset(session.get(url, timeout=60).text))
-        except Exception as exc:
+        except (requests.RequestException, ValueError) as exc:
             log.warning("FireHOL (%s) failed: %s", url, exc)
 
     v4_csv = v6_csv = ""
     try:
         v4_csv = session.get(IPTOASN_V4_URL, timeout=180).text
-    except Exception as exc:
+    except requests.RequestException as exc:
         log.warning("iptoasn IPv4 failed: %s", exc)
     try:
         v6_csv = session.get(IPTOASN_V6_URL, timeout=180).text
-    except Exception as exc:
+    except requests.RequestException as exc:
         log.warning("iptoasn IPv6 failed: %s", exc)
 
     blocklist = IpBlocklist(cidrs)
@@ -276,7 +287,7 @@ def parse_rdap_registration_ts(payload: dict) -> int | None:
             if not raw_date:
                 continue
             try:
-                parsed = dt.datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+                parsed = dt.datetime.fromisoformat(raw_date)
                 return int(parsed.timestamp())
             except ValueError:
                 continue
@@ -289,7 +300,7 @@ def _load_rdap_cache(path: Path | None) -> dict[str, dict]:
     try:
         with gzip.open(path, "rt", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except (OSError, json.JSONDecodeError, ValueError):
         return {}
 
 
@@ -301,20 +312,29 @@ def _save_rdap_cache(path: Path | None, cache: dict[str, dict]) -> None:
         json.dump(cache, f)
 
 
-async def _fetch_rdap_batch_async(roots: list[str], concurrency: int = 12) -> dict[str, int | None]:
+async def _fetch_rdap_batch_async(
+    roots: list[str], concurrency: int = 12
+) -> dict[str, int | None]:
     sem = asyncio.Semaphore(concurrency)
     timeout = aiohttp.ClientTimeout(total=6.0, sock_connect=3.0)
-    headers = {"User-Agent": "rustrict", "Accept": "application/rdap+json, application/json"}
+    headers = {
+        "User-Agent": "rustrict",
+        "Accept": "application/rdap+json, application/json",
+    }
 
-    async def query_one(sess: aiohttp.ClientSession, root: str) -> tuple[str, int | None]:
+    async def query_one(
+        sess: aiohttp.ClientSession, root: str
+    ) -> tuple[str, int | None]:
         async with sem:
             try:
-                async with sess.get(RDAP_URL.format(root), allow_redirects=True) as resp:
+                async with sess.get(
+                    RDAP_URL.format(root), allow_redirects=True
+                ) as resp:
                     if resp.status != 200:
                         return root, None
                     data = await resp.json(content_type=None)
                     return root, parse_rdap_registration_ts(data)
-            except Exception:
+            except (aiohttp.ClientError, TimeoutError, OSError, ValueError):
                 return root, None
 
     out: dict[str, int | None] = {}
@@ -347,7 +367,11 @@ def fetch_domain_ages_days(
     for root in unique_roots:
         rec = cache.get(root)
         if rec:
-            ttl = RDAP_CACHE_TTL_SEC if rec.get("reg_ts") is not None else RDAP_MISS_TTL_SEC
+            ttl = (
+                RDAP_CACHE_TTL_SEC
+                if rec.get("reg_ts") is not None
+                else RDAP_MISS_TTL_SEC
+            )
             if (now - int(rec.get("checked_at", 0))) < ttl:
                 if rec.get("reg_ts") is not None:
                     ages[root] = max(0, (now - int(rec["reg_ts"])) // 86_400)
@@ -360,7 +384,9 @@ def fetch_domain_ages_days(
 
     log.info("RDAP domain age: %d cached, %d to query", len(ages), len(to_query))
     if to_query:
-        fetched = asyncio.run(_fetch_rdap_batch_async(to_query, concurrency=concurrency))
+        fetched = asyncio.run(
+            _fetch_rdap_batch_async(to_query, concurrency=concurrency)
+        )
         for root, reg_ts in fetched.items():
             cache[root] = {"reg_ts": reg_ts, "checked_at": now}
             if reg_ts is not None:

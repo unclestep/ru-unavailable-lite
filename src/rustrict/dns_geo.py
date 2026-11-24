@@ -8,6 +8,7 @@ import ipaddress
 import logging
 from dataclasses import dataclass
 
+import dns.exception
 import dns.resolver
 
 log = logging.getLogger(__name__)
@@ -28,10 +29,16 @@ class CountryDB:
 
     def __init__(self, ipv4_csv: str, ipv6_csv: str = "") -> None:
         self._v4 = self._parse_csv(ipv4_csv, ipaddress.IPv4Address)
-        self._v6 = self._parse_csv(ipv6_csv, ipaddress.IPv6Address) if ipv6_csv else ([], [], [])
+        self._v6 = (
+            self._parse_csv(ipv6_csv, ipaddress.IPv6Address)
+            if ipv6_csv
+            else ([], [], [])
+        )
 
     @staticmethod
-    def _parse_csv(csv_text: str, addr_cls: type) -> tuple[list[int], list[int], list[str]]:
+    def _parse_csv(
+        csv_text: str, addr_cls: type
+    ) -> tuple[list[int], list[int], list[str]]:
         rows: list[tuple[int, int, str]] = []
         for line in csv_text.splitlines():
             parts = line.split(",")
@@ -74,7 +81,9 @@ def _new_resolver() -> dns.resolver.Resolver:
     return r
 
 
-def _lookup_one(resolver: dns.resolver.Resolver, domain: str, timeout: float) -> DnsResult:
+def _lookup_one(
+    resolver: dns.resolver.Resolver, domain: str, timeout: float
+) -> DnsResult:
     ips: list[str] = []
     nxdomain = False
     had_error = False
@@ -88,7 +97,7 @@ def _lookup_one(resolver: dns.resolver.Resolver, domain: str, timeout: float) ->
             break
         except dns.resolver.NoAnswer:
             continue
-        except Exception:
+        except (dns.exception.DNSException, OSError):
             had_error = True
 
     if ips:
@@ -109,7 +118,9 @@ def resolve_domains(domains: list[str], workers: int = 100) -> dict[str, DnsResu
         if not batch:
             return
         with cf.ThreadPoolExecutor(max_workers=workers) as pool:
-            for d, res in zip(batch, pool.map(lambda x: _lookup_one(resolver, x, timeout), batch)):
+            for d, res in zip(
+                batch, pool.map(lambda x: _lookup_one(resolver, x, timeout), batch)
+            ):
                 results[d] = res
 
     run_pass(domains, FAST_TIMEOUT)
@@ -121,7 +132,9 @@ def resolve_domains(domains: list[str], workers: int = 100) -> dict[str, DnsResu
     return results
 
 
-def check_mx_records(domains: list[str], workers: int = 80, timeout: float = FAST_TIMEOUT) -> set[str]:
+def check_mx_records(
+    domains: list[str], workers: int = 80, timeout: float = FAST_TIMEOUT
+) -> set[str]:
     """Return subset of domains that publish MX records (useful to flag mail-only domains)."""
     if not domains:
         return set()
@@ -132,7 +145,7 @@ def check_mx_records(domains: list[str], workers: int = 80, timeout: float = FAS
         try:
             answers = resolver.resolve(domain, "MX", lifetime=timeout)
             return len(answers) > 0
-        except Exception:
+        except (dns.exception.DNSException, OSError):
             return False
 
     found: set[str] = set()

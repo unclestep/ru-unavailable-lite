@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
-from .classifier import ContentClassifier, DomainClassifier, html_keyword_hits, match_hard_html_junk
+from .classifier import (
+    ContentClassifier,
+    DomainClassifier,
+    html_keyword_hits,
+    match_hard_html_junk,
+)
 from .dns_geo import DnsResult
 from .filters import SKETCHY_TLDS, TaintIndex, dga_signals, has_mirror_shape
-from .normalize import DomainMatcher, PSL
+from .normalize import PSL, DomainMatcher
 from .probe import PageProbe
 from .reputation import IpReputation
 from .semantic import SemanticClassifier, SemanticScore
@@ -48,7 +53,9 @@ def _apply_domain_age_points(reasons: dict[str, int], age_days: int | None) -> N
         _add(reasons, "rdap:old_gt3y", -25)
 
 
-def _apply_crux_points(reasons: dict[str, int], rank: int | None, sketchy_tld: bool) -> None:
+def _apply_crux_points(
+    reasons: dict[str, int], rank: int | None, sketchy_tld: bool
+) -> None:
     if rank is None:
         return
     if rank <= 10_000:
@@ -77,7 +84,9 @@ def _apply_semantic_points(reasons: dict[str, int], sem: SemanticScore | None) -
         _add(reasons, f"sem:legit_{sem.legit_category}", -20)
 
 
-def _apply_ml_points(reasons: dict[str, int], domain_prob: float, content_prob: float | None) -> None:
+def _apply_ml_points(
+    reasons: dict[str, int], domain_prob: float, content_prob: float | None
+) -> None:
     if domain_prob >= 0.92:
         _add(reasons, "ml:domain_high", 75)
     elif domain_prob >= 0.80:
@@ -122,7 +131,9 @@ def score_and_filter_domains(
     # 1. Semantic zero-shot embeddings over all fetched HTML pages.
     semantic_scores: dict[str, SemanticScore] = {}
     if semantic_clf is not None and probes:
-        semantic_scores = semantic_clf.score_probes(probes[d] for d in domains if d in probes)
+        semantic_scores = semantic_clf.score_probes(
+            probes[d] for d in domains if d in probes
+        )
 
     # 2. Train HTML+Domain distant-supervision ContentClassifier from clear seeds.
     junk_html_seeds: list[PageProbe] = []
@@ -137,9 +148,18 @@ def score_and_filter_domains(
         hard = match_hard_html_junk(probe, psl, feed_matcher)
         _, kw_hits = html_keyword_hits(probe)
         sem = semantic_scores.get(d)
-        if hard or kw_hits >= 2 or domain_probs[d] >= 0.92 or (sem and sem.margin >= 0.08):
+        if (
+            hard
+            or kw_hits >= 2
+            or domain_probs[d] >= 0.92
+            or (sem and sem.margin >= 0.08)
+        ):
             junk_html_seeds.append(probe)
-        elif domain_probs[d] <= 0.15 and kw_hits == 0 and (not sem or sem.margin <= -0.02):
+        elif (
+            domain_probs[d] <= 0.15
+            and kw_hits == 0
+            and (not sem or sem.margin <= -0.02)
+        ):
             legit_html_seeds.append(probe)
 
     content_clf = ContentClassifier()
@@ -147,7 +167,10 @@ def score_and_filter_domains(
     content_probs: dict[str, float] = {}
     if content_clf.fitted and html_candidates:
         content_probs = dict(
-            zip((p.domain for p in html_candidates), content_clf.predict_scores(html_candidates))
+            zip(
+                (p.domain for p in html_candidates),
+                content_clf.predict_scores(html_candidates),
+            )
         )
 
     # 3. Pre-score every domain before selective RDAP lookups.
@@ -193,7 +216,9 @@ def score_and_filter_domains(
         _apply_crux_points(reasons, crux_ranks.get(d), sketchy_tld)
 
         # HTML keyword & content signals
-        has_usable_html = bool(probe and probe.status == "ok" and len(probe.combined_text()) >= 15)
+        has_usable_html = bool(
+            probe and probe.status == "ok" and len(probe.combined_text()) >= 15
+        )
         if probe and probe.status == "ok":
             kw_cat, kw_hits = html_keyword_hits(probe)
             if kw_cat and kw_hits >= 2:
@@ -202,8 +227,15 @@ def score_and_filter_domains(
                 _add(reasons, f"html_weak:{kw_cat}", 30)
 
         # Grey-zone default-deny: suspicious domain with no readable HTML (403/JS-SPA/non-HTML)
-        if probe is not None and not has_usable_html and (
-            sketchy_tld or dga["leetspeak"] or dga["consonant_cluster"] or taint.stem_drop_count(d, psl) >= 2
+        if (
+            probe is not None
+            and not has_usable_html
+            and (
+                sketchy_tld
+                or dga["leetspeak"]
+                or dga["consonant_cluster"]
+                or taint.stem_drop_count(d, psl) >= 2
+            )
         ):
             _add(reasons, "grey:no_html_suspicious", 35)
         if probe is not None and probe.status == "non_html" and d in mx_domains:

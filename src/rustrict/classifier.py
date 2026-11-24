@@ -16,46 +16,112 @@ from sklearn.metrics import precision_recall_curve, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-from .filters import SKETCHY_TLDS, dga_signals, domain_stem, has_mirror_shape, match_junk_domain_rule
-from .normalize import DomainMatcher, PSL
+from .filters import (
+    SKETCHY_TLDS,
+    dga_signals,
+    domain_stem,
+    has_mirror_shape,
+    match_junk_domain_rule,
+)
+from .normalize import PSL, DomainMatcher
 from .probe import PageProbe
 
 log = logging.getLogger(__name__)
 
 _HTML_CATEGORY_SIGNALS: dict[str, tuple[re.Pattern[str], ...]] = {
     "gambling": (
-        re.compile(r"\b(?:онлайн[- ]?казино|казино онлайн|игровые автоматы|игровых автоматов)\b", re.I),
-        re.compile(r"\b(?:фриспин\w*|бездепозитн\w*|бонус за регистрацию|промокод\w* казино)\b", re.I),
-        re.compile(r"\b(?:слоты онлайн|играть в слоты|игровые слоты|крутить слоты|джекпот|megaways)\b", re.I),
-        re.compile(r"\b(?:букмекерск\w* контор\w*|ставки на спорт|зеркало бк|рабочее зеркало)\b", re.I),
-        re.compile(r"\b(?:online casino|free spins|slot machines|sports betting|live roulette)\b", re.I),
-        re.compile(r"\b(?:1xbet|1win|vavada|pin[- ]?up|pinco|azino777|vulkan|mostbet|melbet|cabura)\b", re.I),
+        re.compile(
+            r"\b(?:онлайн[- ]?казино|казино онлайн|игровые автоматы|игровых автоматов)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:фриспин\w*|бездепозитн\w*|бонус за регистрацию|промокод\w* казино)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:слоты онлайн|играть в слоты|игровые слоты|крутить слоты|джекпот|megaways)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:букмекерск\w* контор\w*|ставки на спорт|зеркало бк|рабочее зеркало)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:online casino|free spins|slot machines|sports betting|live roulette)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:1xbet|1win|vavada|pin[- ]?up|pinco|azino777|vulkan|mostbet|melbet|cabura)\b",
+            re.IGNORECASE,
+        ),
     ),
     "porn": (
-        re.compile(r"\b(?:порно онлайн|бесплатное порно|порно видео|порно ролики|порнух\w*)\b", re.I),
-        re.compile(r"\b(?:секс видео|смотреть порно|домашнее порно|русское порно|хентай)\b", re.I),
-        re.compile(r"\b(?:интим услуг\w*|проститутк\w*|индивидуалк\w*|эскорт услуг\w*|вебкам модел\w*)\b", re.I),
-        re.compile(r"\b(?:free porn|porn videos|xxx videos|live sex cams?|porn tube|hardcore sex|bdsm)\b", re.I),
+        re.compile(
+            r"\b(?:порно онлайн|бесплатное порно|порно видео|порно ролики|порнух\w*)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:секс видео|смотреть порно|домашнее порно|русское порно|хентай)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:интим услуг\w*|проститутк\w*|индивидуалк\w*|эскорт услуг\w*|вебкам модел\w*)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:free porn|porn videos|xxx videos|live sex cams?|porn tube|hardcore sex|bdsm)\b",
+            re.IGNORECASE,
+        ),
     ),
     "piracy_kino": (
-        re.compile(r"\b(?:смотреть онлайн бесплатно|фильмы онлайн бесплатно|сериалы онлайн бесплатно)\b", re.I),
-        re.compile(r"\b(?:в хорошем качестве|в качестве hd|hd 720|hd 1080|full hd бесплатно)\b", re.I),
-        re.compile(r"\b(?:все серии подряд|все сезоны онлайн|смотреть фильм онлайн)\b", re.I),
-        re.compile(r"\b(?:lord-?film|hdrezka|kinogo|baskino|seasonvar|lostfilm|animego|zagonka|kinobar)\b", re.I),
+        re.compile(
+            r"\b(?:смотреть онлайн бесплатно|фильмы онлайн бесплатно|сериалы онлайн бесплатно)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:в хорошем качестве|в качестве hd|hd 720|hd 1080|full hd бесплатно)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:все серии подряд|все сезоны онлайн|смотреть фильм онлайн)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:lord-?film|hdrezka|kinogo|baskino|seasonvar|lostfilm|animego|zagonka|kinobar)\b",
+            re.IGNORECASE,
+        ),
     ),
     "probiv_leaks": (
-        re.compile(r"\b(?:пробив по номеру|пробить человека|глаз бога|деанон|бот пробива)\b", re.I),
-        re.compile(r"\b(?:складчина курсов|слив курсов|купить аккаунты|базы данных пробив)\b", re.I),
+        re.compile(
+            r"\b(?:пробив по номеру|пробить человека|глаз бога|деанон|бот пробива)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:складчина курсов|слив курсов|купить аккаунты|базы данных пробив)\b",
+            re.IGNORECASE,
+        ),
     ),
     "illicit_ru": (
-        re.compile(r"\b(?:купить справку|медсправк\w* без посещения|купить больничный|купить права)\b", re.I),
-        re.compile(r"\b(?:временная регистрация купить|купить прописку|купить диплом)\b", re.I),
-        re.compile(r"\b(?:даркнет маркет|купить закладк\w*|моментальные клады|семена конопли)\b", re.I),
-        re.compile(r"\b(?:купить сигареты оптом|вейп шоп|доставка алкоголя ночью|купить анаболики)\b", re.I),
+        re.compile(
+            r"\b(?:купить справку|медсправк\w* без посещения|купить больничный|купить права)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:временная регистрация купить|купить прописку|купить диплом)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:даркнет маркет|купить закладк\w*|моментальные клады|семена конопли)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:купить сигареты оптом|вейп шоп|доставка алкоголя ночью|купить анаболики)\b",
+            re.IGNORECASE,
+        ),
     ),
 }
 
-_ADULT_META_RE = re.compile(r"(?:adult|mature|rta-5042)", re.I)
+_ADULT_META_RE = re.compile(r"(?:adult|mature|rta-5042)", re.IGNORECASE)
 
 
 def html_keyword_hits(probe: PageProbe) -> tuple[str | None, int]:
@@ -121,21 +187,25 @@ def _structural_features(
         stem = domain_stem(sld)
         stem_freq = math.log1p(stem_counts.get(stem, 0)) if len(stem) >= 3 else 0.0
         dga = dga_signals(d, psl)
-        rows.append([
-            float(len(sld)),
-            digits / n,
-            float(hyphens),
-            _shannon_entropy(sld),
-            1.0 if tld in SKETCHY_TLDS else 0.0,
-            1.0 if has_mirror_shape(d, psl) else 0.0,
-            1.0 if dga["leetspeak"] else 0.0,
-            1.0 if dga["consonant_cluster"] else 0.0,
-            stem_freq,
-        ])
+        rows.append(
+            [
+                float(len(sld)),
+                digits / n,
+                float(hyphens),
+                _shannon_entropy(sld),
+                1.0 if tld in SKETCHY_TLDS else 0.0,
+                1.0 if has_mirror_shape(d, psl) else 0.0,
+                1.0 if dga["leetspeak"] else 0.0,
+                1.0 if dga["consonant_cluster"] else 0.0,
+                stem_freq,
+            ]
+        )
     return np.asarray(rows, dtype=np.float64)
 
 
-def _threshold_for_precision(y_true: np.ndarray, scores: np.ndarray, target_precision: float) -> float:
+def _threshold_for_precision(
+    y_true: np.ndarray, scores: np.ndarray, target_precision: float
+) -> float:
     precision, _, thresholds = precision_recall_curve(y_true, scores)
     ok = np.where(precision[:-1] >= target_precision)[0]
     return float(thresholds[ok[0]]) if len(ok) else 0.99
@@ -159,25 +229,48 @@ class DomainClassifier:
         self.strict_threshold = 0.95
 
     def _transform(self, domains: list[str], fit: bool = False):
-        x_text = self.vectorizer.fit_transform(domains) if fit else self.vectorizer.transform(domains)
+        x_text = (
+            self.vectorizer.fit_transform(domains)
+            if fit
+            else self.vectorizer.transform(domains)
+        )
         struct = _structural_features(domains, self.psl, self.stem_counts)
-        x_struct = self.scaler.fit_transform(struct) if fit else self.scaler.transform(struct)
+        x_struct = (
+            self.scaler.fit_transform(struct) if fit else self.scaler.transform(struct)
+        )
         return hstack([x_text, csr_matrix(x_struct)], format="csr")
 
-    def fit(self, junk_domains: list[str], legit_domains: list[str], min_precision: float = 0.99) -> float:
-        rng = random.Random(42)
+    def fit(
+        self,
+        junk_domains: list[str],
+        legit_domains: list[str],
+        min_precision: float = 0.99,
+    ) -> float:
+        rng = random.Random(42)  # nosec B311
         cap = 80_000
-        junk = rng.sample(junk_domains, cap) if len(junk_domains) > cap else list(junk_domains)
-        legit = rng.sample(legit_domains, cap) if len(legit_domains) > cap else list(legit_domains)
+        junk = (
+            rng.sample(junk_domains, cap)
+            if len(junk_domains) > cap
+            else list(junk_domains)
+        )
+        legit = (
+            rng.sample(legit_domains, cap)
+            if len(legit_domains) > cap
+            else list(legit_domains)
+        )
 
         X = junk + legit
         y = np.array([1] * len(junk) + [0] * len(legit))
-        X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+        X_tr, X_te, y_tr, y_te = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
 
         self.model.fit(self._transform(X_tr, fit=True), y_tr)
         scores = self.model.predict_proba(self._transform(X_te))[:, 1]
         auc = float(roc_auc_score(y_te, scores))
-        self.strict_threshold = max(_threshold_for_precision(y_te, scores, min_precision), 0.85)
+        self.strict_threshold = max(
+            _threshold_for_precision(y_te, scores, min_precision), 0.85
+        )
         log.info(
             "DomainClassifier trained: junk=%d legit=%d ROC-AUC=%.4f strict_thr=%.3f",
             len(junk),
@@ -230,7 +323,12 @@ class ContentClassifier:
             xc = self.char_vec.transform(domains_titles)
         return hstack([xw, xc], format="csr")
 
-    def fit(self, junk_probes: list[PageProbe], legit_probes: list[PageProbe], min_precision: float = 0.97) -> bool:
+    def fit(
+        self,
+        junk_probes: list[PageProbe],
+        legit_probes: list[PageProbe],
+        min_precision: float = 0.97,
+    ) -> bool:
         if len(junk_probes) < 40 or len(legit_probes) < 40:
             log.info(
                 "ContentClassifier skipped: insufficient labeled pages (junk=%d, legit=%d)",
@@ -241,12 +339,16 @@ class ContentClassifier:
 
         X = list(junk_probes) + list(legit_probes)
         y = np.array([1] * len(junk_probes) + [0] * len(legit_probes))
-        X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+        X_tr, X_te, y_tr, y_te = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
 
         self.model.fit(self._transform(X_tr, fit=True), y_tr)
         scores = self.model.predict_proba(self._transform(X_te))[:, 1]
         auc = float(roc_auc_score(y_te, scores))
-        self.threshold = max(_threshold_for_precision(y_te, scores, min_precision), 0.75)
+        self.threshold = max(
+            _threshold_for_precision(y_te, scores, min_precision), 0.75
+        )
         self.fitted = True
         log.info(
             "ContentClassifier trained: junk=%d legit=%d ROC-AUC=%.4f thr=%.3f",

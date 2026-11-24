@@ -34,29 +34,37 @@ def fetch_crux_snapshot(
 
     client = bigquery.Client(project=project_id)
 
-    probe_sql = f"SELECT MAX(yyyymm) AS m FROM `{CRUX_TABLE}` WHERE yyyymm >= 202401"
+    probe_sql = (
+        "SELECT MAX(yyyymm) AS m FROM `chrome-ux-report.experimental.country` "
+        "WHERE yyyymm >= 202401"
+    )
     yyyymm = int(next(iter(client.query(probe_sql).result()))["m"])
     log.info("Latest CrUX month: %d", yyyymm)
 
-    query = f"""
+    query = """
         SELECT DISTINCT origin, experimental.popularity.rank AS rank
-        FROM `{CRUX_TABLE}`
-        WHERE yyyymm = {yyyymm}
+        FROM `chrome-ux-report.experimental.country`
+        WHERE yyyymm = @yyyymm
           AND country_code = "ru"
-          AND experimental.popularity.rank <= {rank_max}
+          AND experimental.popularity.rank <= @rank_max
     """
+    job_cfg = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("yyyymm", "INT64", yyyymm),
+            bigquery.ScalarQueryParameter("rank_max", "INT64", rank_max),
+        ]
+    )
 
     host_ranks: dict[str, int] = {}
     reg_ranks: dict[str, int] = {}
     total_origins = 0
 
-    for row in client.query(query).result():
+    for row in client.query(query, job_config=job_cfg).result():
         total_origins += 1
         origin = row["origin"]
         rank = int(row["rank"])
         host = (urlsplit(origin).hostname or "").lower().strip(".")
-        if host.startswith("www."):
-            host = host[4:]
+        host = host.removeprefix("www.")
         if not host:
             continue
 
@@ -85,7 +93,9 @@ def filter_by_crux(domains: list[str], crux: CruxSnapshot, psl: PSL) -> list[str
     return list(domain_crux_ranks(domains, crux, psl))
 
 
-def domain_crux_ranks(domains: list[str], crux: CruxSnapshot, psl: PSL) -> dict[str, int]:
+def domain_crux_ranks(
+    domains: list[str], crux: CruxSnapshot, psl: PSL
+) -> dict[str, int]:
     """Return mapping of domains present in CrUX RU to their popularity rank."""
     out: dict[str, int] = {}
     for d in domains:

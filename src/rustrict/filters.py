@@ -4,19 +4,68 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
-from .normalize import DomainMatcher, PSL
+from .normalize import PSL, DomainMatcher
 
-SKETCHY_TLDS = frozenset({
-    "top", "click", "cfd", "sbs", "buzz", "win", "fun", "vip", "site",
-    "online", "club", "art", "lat", "movie", "fan", "cam", "icu", "monster",
-    "cyou", "quest", "rest", "lol", "pics", "bid", "loan", "gdn", "work",
-    "casa", "xyz", "biz", "vu", "pw", "shop", "store", "live", "pro",
-    "porn", "sex", "xxx", "adult", "gay", "webcam", "bet", "casino", "poker",
-    "bond", "mom", "love", "trade", "party", "date", "men", "fit",
-})
+SKETCHY_TLDS = frozenset(
+    {
+        "top",
+        "click",
+        "cfd",
+        "sbs",
+        "buzz",
+        "win",
+        "fun",
+        "vip",
+        "site",
+        "online",
+        "club",
+        "art",
+        "lat",
+        "movie",
+        "fan",
+        "cam",
+        "icu",
+        "monster",
+        "cyou",
+        "quest",
+        "rest",
+        "lol",
+        "pics",
+        "bid",
+        "loan",
+        "gdn",
+        "work",
+        "casa",
+        "xyz",
+        "biz",
+        "vu",
+        "pw",
+        "shop",
+        "store",
+        "live",
+        "pro",
+        "porn",
+        "sex",
+        "xxx",
+        "adult",
+        "gay",
+        "webcam",
+        "bet",
+        "casino",
+        "poker",
+        "bond",
+        "mom",
+        "love",
+        "trade",
+        "party",
+        "date",
+        "men",
+        "fit",
+    }
+)
 
 ADULT_TLDS = frozenset({"porn", "sex", "xxx", "adult", "cam", "webcam", "gay"})
 GAMBLING_TLDS = frozenset({"casino", "bet", "poker"})
@@ -26,12 +75,47 @@ _DIGITS_RE = re.compile(r"\d+")
 _LEETSPEAK_TOKEN_RE = re.compile(r"[a-z]+\d+[a-z]+")
 _CONSONANT_CLUSTER_RE = re.compile(r"[bcdfghjklmnpqrstvwxz]{5,}")
 
-_SAFE_ALNUM_TOKENS = frozenset({
-    "mp3", "mp4", "web3", "b2b", "b2c", "p2p", "k8s", "w3c", "w3schools",
-    "v2ray", "v2box", "h2o", "ipv4", "ipv6", "utf8", "base64", "x86", "x64",
-    "sha256", "md5", "http2", "http3", "html5", "css3", "es6", "ps4", "ps5",
-    "4pda", "3d", "24h", "365d", "i18n", "l10n", "a11y", "c2c", "g2a", "f1",
-})
+_SAFE_ALNUM_TOKENS = frozenset(
+    {
+        "mp3",
+        "mp4",
+        "web3",
+        "b2b",
+        "b2c",
+        "p2p",
+        "k8s",
+        "w3c",
+        "w3schools",
+        "v2ray",
+        "v2box",
+        "h2o",
+        "ipv4",
+        "ipv6",
+        "utf8",
+        "base64",
+        "x86",
+        "x64",
+        "sha256",
+        "md5",
+        "http2",
+        "http3",
+        "html5",
+        "css3",
+        "es6",
+        "ps4",
+        "ps5",
+        "4pda",
+        "3d",
+        "24h",
+        "365d",
+        "i18n",
+        "l10n",
+        "a11y",
+        "c2c",
+        "g2a",
+        "f1",
+    }
+)
 
 _GAMBLING_RE = re.compile(
     r"(?:casino|kazino|azino|vulkan|wulkan|vavada|1win|1xbet|1xlite|mostbet|"
@@ -47,7 +131,7 @@ _PORN_RE = re.compile(
     r"(?:porn|xxx|xvideo|xhamster|xnxx|redtube|youporn|chaturbate|stripchat|"
     r"bongacams|brazzers|hentai|milf|escort|prostit|putan|shlyuh|intim|dosug|"
     r"seks|ebal|ebka|trah|siski|pizda|livejasmin|camsoda|spankbang|tube8|"
-    r"anal(?:forum|foto|galore|planet|sex|porn)|bdsm|pussy|dickof|bitchwithdick|"
+    r"anal(?:forum|foto|galore|planet|sex|porn)|bdsm|pussy|dickof|bitchwithdick|"  # codespell:ignore foto
     r"fetish|erotic|eroboom|sexfree|cosmosex|clicsex|forumosexe|gayerotic|"
     r"runetki|teamskeet|naughtymag|boyfriendoncam|r-34|livegore|smolensklust|"
     r"habarovsklust|manga18free|adult(?:time|work|prime|ptv|chat)|"
@@ -98,9 +182,7 @@ def has_mirror_shape(domain: str, psl: PSL) -> bool:
         return True
     if any(ch.isdigit() for ch in sld):
         return True
-    if _RANDOM_SUFFIX_RE.search(sld):
-        return True
-    return False
+    return bool(_RANDOM_SUFFIX_RE.search(sld))
 
 
 def dga_signals(domain: str, psl: PSL) -> dict[str, bool]:
@@ -109,8 +191,7 @@ def dga_signals(domain: str, psl: PSL) -> dict[str, bool]:
     tokens = [t for t in re.split(r"[-_]", sld) if t]
 
     leetspeak = any(
-        _LEETSPEAK_TOKEN_RE.search(t) and t not in _SAFE_ALNUM_TOKENS
-        for t in tokens
+        _LEETSPEAK_TOKEN_RE.search(t) and t not in _SAFE_ALNUM_TOKENS for t in tokens
     )
     consonant_cluster = bool(_CONSONANT_CLUSTER_RE.search(sld))
 
@@ -175,7 +256,7 @@ class TaintIndex:
         dropped_domains: Iterable[str],
         psl: PSL,
         allow_matcher: DomainMatcher,
-    ) -> "TaintIndex":
+    ) -> TaintIndex:
         roots: set[str] = set()
         stems: Counter[str] = Counter()
 
